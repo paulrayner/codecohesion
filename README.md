@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ABRnay8PM5)
 
 **[🚀 Live Demo](https://codecohesion.virtualgenius.com/)** | Explore React, Gource, cBioPortal, and more!
 
