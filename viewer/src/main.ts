@@ -26,6 +26,52 @@ import { determineFileToLoad, detectDataFormat, extractSnapshot } from './lib/da
 import { buildVisualizerConfig, SavedPreferences, createLayoutStrategy } from './lib/visualizer-config';
 import { applyVisualizerConfig } from './lib/visualizer-adapter';
 
+type BrowserType = 'chrome' | 'firefox' | 'edge' | 'safari' | 'unknown';
+
+const WEBGL_HELP_MESSAGES: Record<BrowserType, string> = {
+  chrome: `
+    <strong style="color: #ccc;">To fix in Chrome:</strong><br>
+    1. Go to <code style="background: #333; padding: 2px 6px; border-radius: 3px;">chrome://settings/system</code><br>
+    2. Enable "Use hardware acceleration when available"<br>
+    3. Restart Chrome
+  `,
+  firefox: `
+    <strong style="color: #ccc;">To fix in Firefox:</strong><br>
+    1. Go to <code style="background: #333; padding: 2px 6px; border-radius: 3px;">about:preferences</code><br>
+    2. Scroll to Performance<br>
+    3. Enable "Use hardware acceleration when available"<br>
+    4. Restart Firefox
+  `,
+  edge: `
+    <strong style="color: #ccc;">To fix in Edge:</strong><br>
+    1. Go to <code style="background: #333; padding: 2px 6px; border-radius: 3px;">edge://settings/system</code><br>
+    2. Enable "Use hardware acceleration when available"<br>
+    3. Restart Edge
+  `,
+  safari: `
+    <strong style="color: #ccc;">To fix in Safari:</strong><br>
+    WebGL should be enabled by default. Try restarting Safari or your Mac.<br>
+    If the issue persists, check System Settings → Displays for GPU issues.
+  `,
+  unknown: `
+    <strong style="color: #ccc;">To fix:</strong><br>
+    Enable hardware acceleration in your browser settings and restart the browser.
+  `,
+};
+
+function detectBrowser(userAgent: string): BrowserType {
+  if (userAgent.includes('Edg')) return 'edge';
+  if (userAgent.includes('Chrome')) return 'chrome';
+  if (userAgent.includes('Firefox')) return 'firefox';
+  if (userAgent.includes('Safari')) return 'safari';
+  return 'unknown';
+}
+
+function getBrowserSpecificWebGLHelp(): string {
+  const browser = detectBrowser(navigator.userAgent);
+  return WEBGL_HELP_MESSAGES[browser];
+}
+
 /**
  * Get list of available repositories (base names only, no -timeline variants)
  */
@@ -1937,15 +1983,31 @@ async function loadRepository(repoName: string) {
     console.error('Error initializing visualization:', error);
     const loading = document.getElementById('loading');
     if (loading) {
-      loading.innerHTML = `
-        <p style="color: #ff4444;">Error loading visualization</p>
-        <p style="font-size: 12px; margin-top: 10px; color: #888;">
-          ${error instanceof Error ? error.message : 'Unknown error'}
-        </p>
-        <p style="font-size: 12px; margin-top: 10px; color: #888;">
-          Make sure you've run the processor and placed the data file in public/data/
-        </p>
-      `;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isWebGLError = errorMessage.toLowerCase().includes('webgl');
+
+      if (isWebGLError) {
+        const browserHelp = getBrowserSpecificWebGLHelp();
+        loading.innerHTML = `
+          <p style="color: #ff4444;">WebGL is not available</p>
+          <p style="font-size: 13px; margin-top: 15px; color: #ccc;">
+            This visualization requires WebGL, which is disabled in your browser.
+          </p>
+          <p style="font-size: 12px; margin-top: 15px; color: #888; text-align: left; max-width: 420px; margin-left: auto; margin-right: auto;">
+            ${browserHelp}
+          </p>
+        `;
+      } else {
+        loading.innerHTML = `
+          <p style="color: #ff4444;">Error loading visualization</p>
+          <p style="font-size: 12px; margin-top: 10px; color: #888;">
+            ${errorMessage}
+          </p>
+          <p style="font-size: 12px; margin-top: 10px; color: #888;">
+            Make sure you've run the processor and placed the data file in public/data/
+          </p>
+        `;
+      }
     }
   }
 }
