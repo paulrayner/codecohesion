@@ -6,6 +6,9 @@ dist/
 # Claude Code
 .claude/
 
+# Vite cache
+viewer/.vite/
+
 # Processor output
 processor/output/*.json
 
