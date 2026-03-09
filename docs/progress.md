@@ -54,18 +54,18 @@ Open-source 3D visualization tool for analyzing code cohesion and architectural 
 - Mode switcher (HEAD Analysis vs Timeline)
 
 ### API (v0.9.0+)
-- Express API on port 3001 with CORS
-- `POST /api/process` with SSE progress streaming — now supports `structure` processing mode
-- Processor-as-library (no CLI shelling)
-- Supports local paths and GitHub URLs (auto-clones)
-- LRU cache for response caching
-- Writes output to `viewer/public/data/` with `repos.json` updates
-- `GET /api/repos/:repoId/imports` — import edges with `?file=` and `?external=` filters
-- `GET /api/repos/:repoId/structure` — structure metadata and function declarations
-- `findRepoByUrl()` — lookup repository by GitHub URL
-- Improved error handling: distinguishes 404 (not found) from 500 (internal error)
-- HATEOAS links for imports and structure endpoints in repo listings
-- Path traversal protection on structure data loading
+- Express API on port 3001 with CORS, LRU cache, path traversal protection
+- **19 endpoints** covering repos, stats, contributors, files, hotspots, imports, structure, complexity, coupling, impact, context, health, OpenAPI docs, and processing
+- `POST /api/process` with SSE progress streaming (modes: head, timeline-v1, timeline-v2, coupling, structure, complexity)
+- Processor-as-library integration (no CLI shelling)
+- `GET /api/repos/:repoId/complexity` + `/complexity/hotspots` — per-file metrics and hotspot ranking
+- `GET /api/repos/:repoId/impact/:filePath` — blast radius via BFS traversal
+- `GET /api/repos/:repoId/context/:filePath` — aggregated ownership, imports, functions, coupling
+- `GET /api/repos/:repoId/coupling` + `/coupling/:filePath` — temporal coupling graph
+- `GET /api/repos/:repoId/health` — composite 0-100 score with weighted metrics and graceful degradation
+- `GET /api/docs` — OpenAPI 3.1 JSON spec; `GET /api/docs/ui` — Swagger UI
+- Full HATEOAS links on all repo listings (complexity, impact, context, coupling, health, structure, imports, hotspots, contributors, files, stats)
+- 118 API tests across 12 test files
 
 ### Viewer Extracted Modules (v0.9.0+)
 - `process-client.ts`, `generated-files.ts`, `github-links.ts`, `webgl-error.ts`
@@ -126,8 +126,8 @@ Open-source 3D visualization tool for analyzing code cohesion and architectural 
 
 See [todo.md](todo.md) for the full backlog. Key areas:
 
-- **Force-directed layout** — territory-based overlap detection implemented, further tuning ongoing on `claude-harness-refactoring` branch
-- **API query features** — imports and structure endpoints done; remaining: contributor date filtering, file sorting by metric (see [API plan](plans/api-plan.md))
+- **Force-directed layout** — territory-based overlap detection implemented, further tuning ongoing
+- **API persistence** — PostgreSQL storage for historical comparisons (see [API plan](plans/api-plan.md))
 - **Timeline enhancements** — rename detection, video export, per-file metrics (see [timeline plan](plans/full-delta-timeline.md))
 - **DDD vision** — ubiquitous language analysis, bounded context scoring (see [DDD vision](plans/ddd-vision.md))
 - **Viewer refactoring** — main.ts extraction continues (see [refactoring analysis](main-ts-refactoring-analysis.md))

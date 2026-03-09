@@ -1,6 +1,6 @@
 # Vision: DDD Bounded Context Detection
 
-**Implementation Status:** The temporal coupling foundation is implemented — `CouplingAnalyzer` with Louvain clustering exists in `processor/src/coupling-analyzer.ts`, and the `--coupling` CLI flag works. The full DDD vision below (ubiquitous language analysis, vocabulary clustering, connascence detection, bounded context scoring) remains future work.
+**Implementation Status:** The temporal coupling foundation is implemented — `CouplingAnalyzer` with Louvain clustering exists in `processor/src/coupling-analyzer.ts`, and the `--coupling` CLI flag works. Additionally, `StructureAnalyzer` (tree-sitter AST parsing) now provides static import edges and function declarations, and `ComplexityAnalyzer` provides cyclomatic/cognitive complexity metrics with hotspot scoring — both offering further signals for bounded context detection. The full DDD vision below (ubiquitous language analysis, vocabulary clustering, connascence detection, bounded context scoring) remains future work.
 
 ---
 

@@ -89,7 +89,7 @@
 
 - [ ] GitHub App (PR comments with churn analysis, check runs)
 - [ ] Slack/Discord bot commands
-- [ ] Repository health score (0-100 based on churn, contributors, coupling, stability)
+- [x] Repository health score (0-100 based on churn, contributors, coupling, complexity)
 - [ ] Bounded context recommendations via coupling clustering
 - [ ] Prometheus metrics endpoint for Grafana/Datadog
 

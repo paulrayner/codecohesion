@@ -5,17 +5,17 @@
 The CodeCohesion API is a lightweight TypeScript/Express server that reads analysis JSON files from the processor and exposes them via RESTful HTTP endpoints.
 
 **Core Responsibilities:**
-- Load and parse JSON files from `api/data/`
+- Load and parse JSON files from `viewer/public/data/`
 - Map repository URLs to internal file identifiers
 - Filter and aggregate data based on query parameters
+- Run on-demand analysis via processor-as-library integration
 - Return JSON responses following REST conventions
 - Handle errors gracefully with appropriate HTTP status codes
+- Serve OpenAPI 3.1 spec and Swagger UI
 
-**Non-Responsibilities (Initially):**
-- Running git analysis (processor does this)
-- Storing data in a database (reads files directly)
-- Authentication or rate limiting (trust-based initially)
-- Modifying or writing analysis data (read-only API)
+**Non-Responsibilities:**
+- Storing data in a database (reads JSON files directly)
+- Authentication or rate limiting (trust-based)
 
 ---
 
@@ -68,28 +68,36 @@ The CodeCohesion API is a lightweight TypeScript/Express server that reads analy
 
 ```
 codecohesion/
-├── processor/              # Existing analyzer (unchanged)
-│   ├── src/
-│   │   ├── types.ts        # Shared types (FileNode, RepositorySnapshot, etc.)
-│   │   └── analyze.ts
-│   └── output/             # Generated JSON files (data source for API)
+├── packages/
+│   ├── shared-types/       # Source of truth for shared TypeScript interfaces
+│   ├── cli/                # Unified CLI (analyze, view, serve, context, impact, risk, who)
+│   └── mcp/                # MCP server (stdio transport)
 │
-├── viewer/                 # Existing 3D visualizer (unchanged)
+├── processor/              # Git analysis engine (importable as library)
+│   └── src/
+│       ├── index.ts            # Public API exports
+│       ├── structure-analyzer.ts   # Tree-sitter AST parsing
+│       ├── complexity-analyzer.ts  # Cyclomatic/cognitive complexity
+│       └── coupling-analyzer.ts    # Temporal co-change analysis
 │
-└── api/                    # NEW: REST API server
+├── viewer/                 # 3D visualization (Three.js)
+│   └── public/data/        # Analysis JSON files (API reads/writes here)
+│
+└── api/                    # REST API server
     ├── src/
     │   ├── server.ts           # Express app setup, CORS, error handling
-    │   ├── routes.ts           # API endpoint definitions
-    │   ├── data-loader.ts      # File system operations, JSON parsing
-    │   ├── query-service.ts    # Business logic for queries
-    │   └── types.ts            # API-specific types (responses, errors)
+    │   ├── routes.ts           # 19 endpoint definitions + HATEOAS links
+    │   ├── data-loader.ts      # File I/O with path traversal protection + LRU cache
+    │   ├── query-service.ts    # Business logic (transforms, aggregation, BFS)
+    │   ├── process-service.ts  # Async job orchestrator with SSE streaming
+    │   ├── openapi-spec.ts     # OpenAPI 3.1 specification object
+    │   ├── lru-cache.ts        # Generic LRU cache implementation
+    │   └── types.ts            # API-specific response types
     │
-    ├── dist/                   # Compiled JavaScript (git-ignored)
-    │
-    ├── package.json            # Dependencies: express, cors, typescript
-    ├── tsconfig.json           # TypeScript config (reuse processor's)
-    ├── Procfile                # Railway deployment: web: node dist/server.js
-    └── README.md               # API-specific docs
+    ├── src/__tests__/          # Vitest tests (supertest + mocked fs)
+    ├── test/data/              # Test fixtures
+    ├── package.json
+    └── tsconfig.json
 ```
 
 ---
@@ -140,12 +148,16 @@ codecohesion/
 ### File System Layout
 
 ```
-api/data/
+viewer/public/data/
+├── repos.json                        # Repository index (updated by POST /api/process)
 ├── react-timeline-full.json          # Timeline V2 format
+├── react-timeline-full-structure.json    # Structure analysis
+├── react-timeline-full-complexity.json   # Complexity analysis
+├── react-timeline-full-coupling.json     # Coupling analysis
 ├── gource-data.json                  # Static snapshot
-└── cbioportal-timeline-full.json    # Timeline V2 format
+└── ...
 
-API reads these files directly (no database initially)
+API reads from and writes to viewer/public/data/ (shared with viewer)
 ```
 
 ---
@@ -698,72 +710,44 @@ Processor updates this file on each analysis run. API reads it for URL lookups.
 
 ## Performance Considerations
 
-### Current Approach (Phase 1)
-- Read JSON files on every request
-- No caching
-- Single-threaded Node.js
+### Current Approach
+- LRU cache (size 20) for parsed JSON data — avoids re-reading files on repeated requests
+- Single-threaded Node.js with async I/O
+- Path traversal protection on all file reads
 
-**Expected Performance:**
-- File reads: 10-50ms for typical files (1-10 MB)
-- JSON parsing: 20-100ms
+**Typical Performance:**
+- Cache hit: <5ms
+- Cache miss (file read + JSON parse): 50-200ms for typical files (1-10 MB)
 - Query processing: 5-20ms
-- **Total:** 50-200ms per request
 
-**Sufficient for:**
-- Dashboards (refresh every 30s)
-- CI/CD (once per build)
-- Manual queries (human response time)
+### Future Optimizations
 
-### Future Optimizations (Phase 2+)
-
-**1. In-Memory Cache**
-```typescript
-const cache = new Map<string, { data: any, loadedAt: number }>();
-const TTL = 60_000; // 1 minute
-
-async loadRepo(repoId: string) {
-  const cached = cache.get(repoId);
-  if (cached && Date.now() - cached.loadedAt < TTL) {
-    return cached.data;
-  }
-
-  const data = await readFile(...);
-  cache.set(repoId, { data, loadedAt: Date.now() });
-  return data;
-}
-```
-
-**2. Database Storage (PostgreSQL)**
+**1. Database Storage (PostgreSQL)**
 - Store parsed data in normalized tables
 - Fast indexed queries (contributors, files)
 - No JSON parsing overhead
 
-**3. Pre-Computed Aggregations**
+**2. Pre-Computed Aggregations**
 - Store contributor counts at analysis time
-- Pre-calculate hotspots
-- Serve queries in <10ms
+- Pre-calculate hotspots and health scores
 
-**4. Streaming Responses**
+**3. Streaming Responses**
 - Stream large file lists instead of buffering entire response
-- Use JSON Lines format for datasets
 
 ---
 
 ## Security Considerations
 
-### Phase 1 (MVP)
-- **No authentication** - Public read-only API
-- **No rate limiting** - Trust-based usage
-- **CORS whitelist** - Only allow specific origins
+### Current
+- **Path traversal protection** on all DataLoader file reads (validated with dedicated security tests)
+- **Input validation** on query parameters (limit ranges, mode validation, NaN checks)
+- **CORS whitelist** — only allow specific origins
+- **No authentication** — public read-only API (POST /api/process is the exception)
 
-**Risk:** API abuse (DDoS, scraping)
-**Mitigation:** Monitor Railway metrics, add rate limiting if needed
-
-### Phase 2+
-- **API Keys** - Per-user or per-app tokens
-- **Rate Limiting** - 100 requests/minute per IP
-- **Request Signing** - HMAC signatures for trusted clients
-- **HTTPS Only** - Railway provides this by default
+### Future
+- **API Keys** — per-user or per-app tokens
+- **Rate Limiting** — 100 requests/minute per IP
+- **HTTPS Only** — Railway provides this by default
 
 ---
 
@@ -816,73 +800,36 @@ app.get('/health', (req, res) => {
 
 ## Future Architecture Enhancements
 
-### Phase 2: Database Layer
+### Database Layer (If Needed)
 
 ```
 ┌──────────────┐
 │ Express API  │
 └──────┬───────┘
        │
-       ├─────▶ PostgreSQL (for fast queries)
-       │       ├─ repos table
-       │       ├─ files table
-       │       ├─ contributors table
-       │       └─ metrics table (time-series)
+       ├─────▶ PostgreSQL (for fast queries, historical comparisons)
        │
-       └─────▶ File System (for full snapshots)
-               └─ processor/output/*.json
+       └─────▶ File System (current — viewer/public/data/*.json)
 ```
 
-### Phase 3: Background Job Queue
-
-```
-┌────────────┐       ┌──────────┐       ┌────────────┐
-│ POST       │──────▶│ Bull MQ  │──────▶│ Worker     │
-│ /api/      │       │ (Redis)  │       │ (Processor)│
-│ analyze    │       └──────────┘       └────────────┘
-└────────────┘              │                   │
-                            │                   ▼
-                            │          Analyze Git Repo
-                            │                   │
-                            └───────────────────┘
-                                   Store Results
-```
-
-### Phase 4: Microservices (If Needed)
-
-```
-┌─────────────┐     ┌─────────────┐     ┌──────────────┐
-│ Query API   │     │ Analysis    │     │ Notification │
-│ (Express)   │     │ Service     │     │ Service      │
-└─────────────┘     └─────────────┘     └──────────────┘
-       │                   │                     │
-       └───────────────────┴─────────────────────┘
-                           │
-                   Shared PostgreSQL
-```
-
-**Decision:** Start monolithic (single Express app). Only split if necessary (performance, team scaling).
+**Decision:** The current JSON file approach works well for single-user analysis. Database would add value for multi-user deployments and historical trend tracking.
 
 ---
 
 ## Summary
 
 **Architecture Principles:**
-- **Simplicity First** - Express + TypeScript, no unnecessary abstractions
-- **Reuse Existing** - Import processor types, read existing JSON files
-- **Progressive Enhancement** - Start simple, add database/caching later
-- **Deployment Simplicity** - Railway one-click deploy, no complex infrastructure
+- **Simplicity First** — Express + TypeScript, no unnecessary abstractions
+- **Layered Design** — DataLoader (I/O) → QueryService (transforms) → Routes (HTTP)
+- **Processor as Library** — imports RepositoryAnalyzer, StructureAnalyzer, ComplexityAnalyzer directly
+- **Graceful Degradation** — endpoints work with partial data (e.g., health score without complexity)
 
 **Key Components:**
-- `server.ts` - Express app, CORS, error handling
-- `routes.ts` - Endpoint definitions, parameter extraction
-- `data-loader.ts` - File operations, JSON parsing
-- `query-service.ts` - Business logic, filtering, aggregation
+- `server.ts` — Express app, CORS, error handling
+- `routes.ts` — 19 endpoint definitions with HATEOAS links
+- `data-loader.ts` — File I/O with path traversal protection and LRU caching
+- `query-service.ts` — Business logic: filtering, aggregation, BFS traversal, health scoring
+- `process-service.ts` — Async job orchestrator with SSE progress streaming
+- `openapi-spec.ts` — OpenAPI 3.1 spec covering all endpoints
 
-**Deployment:**
-- Railway platform (same as YouTube summarizer)
-- Procfile-based deployment
-- Environment variables for configuration
-- Persistent volume for JSON files
-
-The architecture balances **immediate functionality** with **future extensibility**, allowing the API to evolve from file-based queries to a full-featured service without requiring a complete rewrite.
+The architecture provides a comprehensive analysis API backed by JSON files, with on-demand processing via processor-as-library integration.

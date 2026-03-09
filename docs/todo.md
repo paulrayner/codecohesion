@@ -4,15 +4,18 @@ Future enhancements, ideas, and known limitations.
 
 ## Force-Directed Layout (Marco's Request)
 
-- [ ] **Dynamic force-directed graph layout**
-  - Replace static tree layout with physics-based force simulation
-  - Files/directories attract based on coupling/relationship strength
-  - Files/directories repel when weakly related
-  - Toggle between static tree and force-directed layouts
+- [x] **Physics-based force simulation** — `ForceDirectedLayoutStrategy.ts` with Gource-inspired algorithm
+  - [x] Collision radius (dir_radius) based on descendant count with area-based sqrt scaling
+  - [x] Territory radius (collision radius + max file orbit distance + padding) for overlap detection
+  - [x] Spiral placement, spring-to-parent attraction, territory-based repulsion forces
+  - [x] Spatial index for efficient neighbor queries
+- [ ] **Remaining work**
+  - Toggle between static tree and force-directed layouts in viewer UI
   - Damping/stabilization and animation speed controls
   - Pin/freeze specific nodes
+  - Coupling-based attraction (files that change together attract)
 
-**Note:** `ForceDirectedLayoutStrategy.ts` is in development on the `claude-harness-refactoring` branch.
+**Note:** In active development on the `claude-harness-refactoring` branch.
 
 ## Generated/Minified File Detection
 
@@ -69,7 +72,10 @@ Phase 1 (pattern-based) and Phase 1.6 (expanded patterns) are complete. Remainin
 
 ## Advanced Analysis
 
-- [ ] **Cyclomatic complexity integration** (lizard or similar) with color mode
+- [x] **Cyclomatic complexity analysis** — `ComplexityAnalyzer` with cyclomatic + cognitive complexity per function
+- [x] **Hotspot scoring** — complexity × churn ranking for identifying risky code
+- [x] **Static structure analysis** — `StructureAnalyzer` with tree-sitter AST parsing for imports and functions
+- [ ] **Complexity color mode** — integrate complexity data into viewer color modes
 - [ ] **Technical Debt Quadrant** — 3D scatter: complexity x churn x LOC
 - [ ] **Knowledge Distribution** — bus factor, primary owner color mode
 - [ ] **Architecture Drift** — expected vs actual structure comparison
@@ -104,6 +110,22 @@ Phase 1 (pattern-based) and Phase 1.6 (expanded patterns) are complete. Remainin
 - [ ] Loading progress indicator with time estimate
 - [ ] Performance metrics panel (FPS, render time, memory)
 
+## Completed Recently
+
+- [x] **API completion** — 9 new endpoints: complexity, impact, context, coupling, health, OpenAPI docs (118 tests)
+- [x] **Health scoring** — composite 0-100 score with weighted metrics and graceful degradation
+- [x] **OpenAPI 3.1 spec** — machine-readable spec at `/api/docs`, Swagger UI at `/api/docs/ui`
+- [x] **HATEOAS links** — full navigation links on all repo listing responses
+- [x] **Static structure analysis** — `StructureAnalyzer` (tree-sitter), `--structure` CLI flag, `StructureGraph` format
+- [x] **Complexity analysis** — `ComplexityAnalyzer`, cyclomatic + cognitive metrics, hotspot scoring
+- [x] **CLI query commands** — `context`, `impact`, `risk`, `who` subcommands with `data-reader.ts`
+- [x] **MCP server** — `@codecohesion/mcp` package with stdio transport
+- [x] **API structure endpoints** — `/imports` (with filters), `/structure`, `findRepoByUrl()`
+- [x] **Viewer utilities** — `hotspot-color.ts`, `import-edge-filter.ts`
+- [x] **Force-directed territory radius** — territory-based overlap detection in `PhysicsNode`
+- [x] **Shared types** — `ImportEdgeSummary`, `StructureSummary` DTOs
+- [x] **API error handling** — 404 vs 500 distinction, NaN validation, path traversal protection
+
 ## Related
 
 - [DDD Vision](plans/ddd-vision.md) — bounded context detection, ubiquitous language analysis
@@ -112,5 +134,5 @@ Phase 1 (pattern-based) and Phase 1.6 (expanded patterns) are complete. Remainin
 
 ---
 
-*Last Updated: 2026-03-08*
-*Status: v0.9.0 — Monorepo, API, 9+ Color Modes, Timeline V1/V2, Force-Directed Layout in progress*
+*Last Updated: 2026-03-09*
+*Status: v0.9.0+ — Monorepo, 19-endpoint API with OpenAPI docs, MCP server, CLI query commands, 9+ Color Modes, Timeline V1/V2, Structure/Complexity/Coupling analysis, Force-Directed Layout in progress*
