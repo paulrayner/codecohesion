@@ -4,7 +4,6 @@ import {
   TreeNode,
   RepositorySnapshot,
   TimelineData,
-  TimelineDataV2,
   StatsResponse,
   ContributorsResponse,
   ContributorInfo,

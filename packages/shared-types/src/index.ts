@@ -1,5 +1,7 @@
 /**
- * Shared types for repository analysis
+ * Shared types for CodeCohesion monorepo
+ *
+ * Source of truth for data structures used across processor, viewer, and api.
  */
 
 export interface FileNode {

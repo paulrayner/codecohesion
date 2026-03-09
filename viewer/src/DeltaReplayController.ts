@@ -1,5 +1,5 @@
 import { TreeBuilder } from './TreeBuilder';
-import { TimelineDataV2, DirectoryNode, CommitSnapshot, RepositorySnapshot } from './types';
+import { TimelineDataV2, DirectoryNode, CommitSnapshot, RepositorySnapshot, TreeNode } from './types';
 import { LRUCache } from './LRUCache';
 
 /**
@@ -10,6 +10,30 @@ export interface CommitEvent {
   commit: CommitSnapshot;
   tree: DirectoryNode;
 }
+
+/**
+ * Event data emitted when playback state changes
+ */
+export interface PlayStateEvent {
+  isPlaying: boolean;
+}
+
+/**
+ * Event data emitted when playback ends
+ */
+export interface PlaybackEndedEvent {
+  // No additional data — signals playback reached the final commit
+}
+
+/**
+ * Event data emitted when playback speed changes
+ */
+export interface SpeedChangedEvent {
+  speed: number;
+}
+
+/** Union of all event payloads emitted by DeltaReplayController */
+export type DeltaReplayEventData = CommitEvent | PlayStateEvent | PlaybackEndedEvent | SpeedChangedEvent;
 
 // Threshold for switching between full vs sparse keyframe generation
 // Repos with ≤ this many commits: Full keyframe generation (every commit)
@@ -560,10 +584,10 @@ export class DeltaReplayController {
   /**
    * Extract all file paths from a tree
    */
-  private extractPaths(node: any): string[] {
+  private extractPaths(node: TreeNode): string[] {
     const paths: string[] = [];
 
-    const traverse = (n: any) => {
+    const traverse = (n: TreeNode) => {
       if (n.type === 'file') {
         paths.push(n.path);
       } else if (n.type === 'directory' && n.children) {
@@ -601,7 +625,7 @@ export class DeltaReplayController {
   /**
    * Emit event to all listeners
    */
-  private emit(event: string, data: any): void {
+  private emit(event: string, data: DeltaReplayEventData): void {
     const callbacks = this.listeners.get(event) || [];
     callbacks.forEach(cb => {
       try {

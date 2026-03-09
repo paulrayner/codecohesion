@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DirectoryNode, FileNode, TreeNode } from './types';
+import { DirectoryNode, FileNode } from './types';
 import { ILayoutStrategy, LayoutNode, CameraDefaults } from './ILayoutStrategy';
 import { PhysicsNode } from './PhysicsNode';
 import { SpatialIndex } from './SpatialIndex';
@@ -7,7 +7,7 @@ import { SpatialIndex } from './SpatialIndex';
 /**
  * Configuration for force-directed physics (Gource algorithm)
  */
-interface ForceDirectedConfig {
+export interface ForceDirectedConfig {
   gravity: number;           // Parent attraction strength (default: 10.0)
   collisionPadding: number;  // Extra space between nodes (default: 0.5)
   fileDiameter: number;      // File diameter for ring spacing (default: 1.5)
@@ -23,7 +23,7 @@ interface ForceDirectedConfig {
 /**
  * File orbit info (Gource style - relative positioning)
  */
-interface FileOrbitInfo {
+export interface FileOrbitInfo {
   layoutNode: LayoutNode;
   relativeOffset: THREE.Vector2; // X/Z offset from parent
   parentPhysicsNode: PhysicsNode; // Reference to parent
@@ -113,11 +113,20 @@ export class ForceDirectedLayoutStrategy implements ILayoutStrategy {
    * @param dirNode Directory to calculate radius for
    * @returns Collision radius for this directory
    */
-  private calculateRadius(dirNode: DirectoryNode): number {
+  private calculateDirectoryRadius(dirNode: DirectoryNode): number {
     const dir_area = this.calculateArea(dirNode);
     const dir_radius = Math.max(1.0, Math.sqrt(dir_area)) * 0.23; // Tuned for optimal file orbit ratio
 
     return dir_radius;
+  }
+
+  /**
+   * Calculate radius for child node positioning (satisfies ILayoutStrategy interface).
+   * For the force-directed layout, use sqrt scaling consistent with the area-based model.
+   */
+  calculateRadius(childCount: number): number {
+    const baseRadius = 6;
+    return baseRadius + Math.sqrt(childCount) * 2.5;
   }
 
 
@@ -137,10 +146,10 @@ export class ForceDirectedLayoutStrategy implements ILayoutStrategy {
   layoutTree(
     node: DirectoryNode,
     position: THREE.Vector3,
-    level: number,
-    angleStart: number,
-    angleEnd: number,
-    parentLayout?: LayoutNode
+    _level: number,
+    _angleStart: number,
+    _angleEnd: number,
+    _parentLayout?: LayoutNode
   ): LayoutNode[] {
     // Clear previous state
     this.physicsNodes.clear();
@@ -177,7 +186,7 @@ export class ForceDirectedLayoutStrategy implements ILayoutStrategy {
     parent: PhysicsNode | null
   ): PhysicsNode {
     // Gource's area-based sizing: radius includes all descendants
-    const radius = this.calculateRadius(dirNode);
+    const radius = this.calculateDirectoryRadius(dirNode);
 
     // Calculate parent_radius (Gource: based on direct files only, not subdirectories)
     const fileCount = dirNode.children.filter(c => c.type === 'file').length;
@@ -295,18 +304,6 @@ export class ForceDirectedLayoutStrategy implements ILayoutStrategy {
       index * child.radius * this.config.spiralRadialMultiplier;
 
     return baseDistance + radialOffset;
-  }
-
-  /**
-   * Simple string hash for deterministic randomness
-   */
-  private hashString(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return Math.abs(hash);
   }
 
   /**
@@ -634,7 +631,7 @@ export class ForceDirectedLayoutStrategy implements ILayoutStrategy {
    * Note: Edges are implicitly defined by parent-child relationships,
    * so this is a no-op for this layout strategy
    */
-  addEdge(parent: LayoutNode, child: LayoutNode): void {
+  addEdge(_parent: LayoutNode, _child: LayoutNode): void {
     // No-op: edges follow parent-child relationships automatically
   }
 

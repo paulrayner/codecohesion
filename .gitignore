@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.log
 .DS_Store
+.turbo/
 
 # Claude Code
 .claude/
@@ -18,3 +19,7 @@ viewer/public/data/*.json
 # Marketing content
 marketing/
 .yaks/
+
+# E2E test artifacts
+e2e/reports/
+e2e/fixtures/test-repo/

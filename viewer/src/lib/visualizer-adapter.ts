@@ -1,7 +1,8 @@
-import { TreeVisualizer } from '../TreeVisualizer';
+import { IConfigurableVisualizer } from './configurable-visualizer';
 import { CouplingLoader } from '../couplingLoader';
 import { VisualizerConfiguration } from './visualizer-config';
 import { FileNode, DirectoryNode, TreeNode } from '../types';
+import { ColorMode } from '../colorModeManager';
 
 /**
  * Event handlers for visualizer interactions
@@ -13,18 +14,18 @@ export interface VisualizerEventHandlers {
 }
 
 /**
- * Apply configuration to a TreeVisualizer instance
+ * Apply configuration to a visualizer instance
  *
  * Thin adapter layer that bridges the pure configuration object
- * with the imperative TreeVisualizer API
+ * with the imperative visualizer API
  *
- * @param visualizer - TreeVisualizer instance to configure
+ * @param visualizer - Visualizer instance to configure
  * @param config - Configuration object with settings
  * @param couplingLoader - Optional coupling loader
  * @param handlers - Event handlers
  */
 export function applyVisualizerConfig(
-  visualizer: TreeVisualizer,
+  visualizer: IConfigurableVisualizer,
   config: VisualizerConfiguration,
   couplingLoader: CouplingLoader | null,
   handlers: VisualizerEventHandlers
@@ -46,7 +47,7 @@ export function applyVisualizerConfig(
   }
 
   if (config.colorMode) {
-    visualizer.setColorMode(config.colorMode as any);
+    visualizer.setColorMode(config.colorMode as ColorMode);
   }
 
   if (config.viewMode) {

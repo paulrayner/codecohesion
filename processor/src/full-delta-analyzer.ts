@@ -1,6 +1,7 @@
-import simpleGit, { SimpleGit, DefaultLogFields } from 'simple-git';
+import simpleGit, { SimpleGit } from 'simple-git';
 import * as path from 'path';
-import { TimelineDataV2, CommitSnapshot } from './types.js';
+import { TimelineDataV2, CommitSnapshot } from '@codecohesion/shared-types';
+import { Logger, consoleLogger } from './logger';
 
 interface GitCommit {
   hash: string;
@@ -8,6 +9,7 @@ interface GitCommit {
   author: string;
   message: string;
   refs: string;  // Tags and branches
+  isMerge: boolean;  // Derived from parent count in --format=%P
 }
 
 /**
@@ -17,31 +19,33 @@ interface GitCommit {
 export class FullDeltaAnalyzer {
   private git: SimpleGit;
   private repoPath: string;
+  private logger: Logger;
 
-  constructor(repoPath: string) {
+  constructor(repoPath: string, logger: Logger = consoleLogger) {
     this.repoPath = path.resolve(repoPath);
     this.git = simpleGit(this.repoPath);
+    this.logger = logger;
   }
 
   /**
    * Analyze repository and generate timeline-v2 format
    */
   async analyzeFullDelta(): Promise<TimelineDataV2> {
-    console.log(`\n🔍 Analyzing repository: ${this.repoPath}`);
-    console.log('Extracting full commit history (no sampling)...\n');
+    this.logger.log(`\n🔍 Analyzing repository: ${this.repoPath}`);
+    this.logger.log('Extracting full commit history (no sampling)...\n');
 
     // 1. Get ALL commits
     const allCommits = await this.getAllCommits();
-    console.log(`📊 Found ${allCommits.length} total commits`);
+    this.logger.log(`📊 Found ${allCommits.length} total commits`);
 
     // 2. Extract tags
     const tags = await this.extractAllTags();
-    console.log(`🏷️  Found ${tags.length} version tags`);
+    this.logger.log(`🏷️  Found ${tags.length} version tags`);
 
     // 3. Build commit snapshots with deltas
-    console.log(`\n⚙️  Building commit snapshots...`);
+    this.logger.log(`\n⚙️  Building commit snapshots...`);
     const commitSnapshots = await this.buildCommitSnapshots(allCommits);
-    console.log(`✅ Generated ${commitSnapshots.length} commit snapshots\n`);
+    this.logger.log(`✅ Generated ${commitSnapshots.length} commit snapshots\n`);
 
     // 4. Build metadata
     const metadata = {
@@ -63,14 +67,15 @@ export class FullDeltaAnalyzer {
 
   /**
    * Get ALL commits in chronological order (oldest first)
+   * Includes parent hashes to detect merge commits without separate git calls
    */
   private async getAllCommits(): Promise<GitCommit[]> {
-    // Use raw git command for more control
+    // Include %P (parent hashes) to detect merge commits inline
     const result = await this.git.raw([
       'log',
       '--all',
       '--reverse',  // Oldest first
-      '--format=%H|%aI|%an|%s|%D'  // hash|date|author|message|refs
+      '--format=%H|%aI|%an|%s|%D|%P'  // hash|date|author|message|refs|parents
     ]);
 
     const commits: GitCommit[] = [];
@@ -79,12 +84,14 @@ export class FullDeltaAnalyzer {
     for (const line of lines) {
       const parts = line.split('|');
       if (parts.length >= 4) {
+        const parents = (parts[5] || '').trim().split(/\s+/).filter(Boolean);
         commits.push({
           hash: parts[0],
           date: new Date(parts[1]),
           author: parts[2],
           message: parts[3],
-          refs: parts[4] || ''
+          refs: parts[4] || '',
+          isMerge: parents.length > 1,
         });
       }
     }
@@ -100,7 +107,7 @@ export class FullDeltaAnalyzer {
       const tagList = await this.git.tags();
       return tagList.all || [];
     } catch (error) {
-      console.warn('Could not extract tags:', error);
+      this.logger.warn(`Could not extract tags: ${error}`);
       return [];
     }
   }
@@ -115,7 +122,7 @@ export class FullDeltaAnalyzer {
       const commit = commits[i];
 
       if (i % 100 === 0) {
-        console.log(`  Processing commit ${i + 1}/${commits.length}...`);
+        this.logger.log(`  Processing commit ${i + 1}/${commits.length}...`);
       }
 
       // Extract file changes for this commit
@@ -124,8 +131,8 @@ export class FullDeltaAnalyzer {
       // Extract tags from refs (format: "tag: v1.0.0, tag: v1.0.1")
       const tags = this.parseTagsFromRefs(commit.refs);
 
-      // Check if merge commit (has multiple parents)
-      const isMergeCommit = await this.isMergeCommit(commit.hash);
+      // Use isMerge from getAllCommits() (derived from %P parent hashes) — no extra git call
+      const isMergeCommit = commit.isMerge;
 
       snapshots.push({
         hash: commit.hash,
@@ -167,19 +174,36 @@ export class FullDeltaAnalyzer {
         };
       }
 
-      // For other commits, use git show with --name-status and --numstat
-      const nameStatus = await this.git.show([
-        hash,
+      // Combine --name-status and --numstat in a single git call to halve subprocess count.
+      // The output has numstat lines first, then a blank line, then name-status lines.
+      const combinedOutput = await this.git.raw([
+        'diff-tree',
+        '-r',
+        '--no-renames',
+        '--numstat',
         '--name-status',
         '--format=',
-        '--no-renames'  // Treat renames as delete + add for simplicity
+        hash
       ]);
 
-      const numstat = await this.git.show([
-        hash,
-        '--numstat',
-        '--format='
-      ]);
+      // Parse the combined output: git diff-tree with both flags outputs numstat-style
+      // lines followed by name-status lines. We separate them by format:
+      // numstat: "10\t5\tfilepath" or "-\t-\tfilepath" (binary)
+      // name-status: "M\tfilepath" or "A\tfilepath"
+      const allLines = combinedOutput.split('\n').filter(l => l.trim());
+
+      let nameStatusSection = '';
+      let numstat = '';
+      for (const line of allLines) {
+        const trimmed = line.trim();
+        // numstat lines start with a digit or '-' followed by a tab, then another digit/'-' and tab
+        if (/^\d+\t\d+\t/.test(trimmed) || /^-\t-\t/.test(trimmed)) {
+          numstat += trimmed + '\n';
+        } else {
+          nameStatusSection += trimmed + '\n';
+        }
+      }
+      const nameStatus = nameStatusSection;
 
       // Parse file changes
       const filesAdded: string[] = [];
@@ -245,7 +269,7 @@ export class FullDeltaAnalyzer {
         linesDeleted
       };
     } catch (error) {
-      console.warn(`Warning: Could not extract changes for ${hash}:`, error);
+      this.logger.warn(`Warning: Could not extract changes for ${hash}: ${error}`);
       return {
         filesAdded: [],
         filesModified: [],
@@ -265,21 +289,8 @@ export class FullDeltaAnalyzer {
       const result = await this.git.raw(['ls-tree', '-r', '--name-only', hash]);
       return result.split('\n').filter(f => f.trim().length > 0);
     } catch (error) {
-      console.warn(`Warning: Could not list files for ${hash}:`, error);
+      this.logger.warn(`Warning: Could not list files for ${hash}: ${error}`);
       return [];
-    }
-  }
-
-  /**
-   * Check if commit is a merge commit
-   */
-  private async isMergeCommit(hash: string): Promise<boolean> {
-    try {
-      const result = await this.git.raw(['rev-list', '--parents', '-n', '1', hash]);
-      const parents = result.trim().split(/\s+/);
-      return parents.length > 2;  // More than 1 parent (first item is the commit itself)
-    } catch (error) {
-      return false;
     }
   }
 

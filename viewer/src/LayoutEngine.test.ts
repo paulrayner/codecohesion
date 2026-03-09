@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { HierarchicalLayoutStrategy } from './HierarchicalLayoutStrategy';
 import { DirectoryNode, FileNode } from './types';
+import { LayoutNode } from './ILayoutStrategy';
+import { createMockFile } from './lib/test-fixtures';
 
 describe('HierarchicalLayoutStrategy', () => {
   let layoutEngine: HierarchicalLayoutStrategy;
@@ -75,23 +77,7 @@ describe('HierarchicalLayoutStrategy', () => {
     });
 
     it('should layout directory with single file', () => {
-      const fileNode: FileNode = {
-        type: 'file',
-        name: 'test.ts',
-        path: 'test.ts',
-        extension: 'ts',
-        loc: 100,
-        lastModified: null,
-        lastAuthor: null,
-        commitCount: null,
-        contributorCount: null,
-        firstCommitDate: null,
-        recentLinesChanged: null,
-        avgLinesPerCommit: null,
-        daysSinceLastModified: null,
-        lastCommitHash: null,
-        isGenerated: false
-      };
+      const fileNode: FileNode = createMockFile({ name: 'test.ts', path: 'test.ts' });
 
       const root: DirectoryNode = {
         type: 'directory',
@@ -125,41 +111,8 @@ describe('HierarchicalLayoutStrategy', () => {
     });
 
     it('should layout multiple files in full circle', () => {
-      const file1: FileNode = {
-        type: 'file',
-        name: 'file1.ts',
-        path: 'file1.ts',
-        extension: 'ts',
-        loc: 100,
-        lastModified: null,
-        lastAuthor: null,
-        commitCount: null,
-        contributorCount: null,
-        firstCommitDate: null,
-        recentLinesChanged: null,
-        avgLinesPerCommit: null,
-        daysSinceLastModified: null,
-        lastCommitHash: null,
-        isGenerated: false
-      };
-
-      const file2: FileNode = {
-        type: 'file',
-        name: 'file2.ts',
-        path: 'file2.ts',
-        extension: 'ts',
-        loc: 100,
-        lastModified: null,
-        lastAuthor: null,
-        commitCount: null,
-        contributorCount: null,
-        firstCommitDate: null,
-        recentLinesChanged: null,
-        avgLinesPerCommit: null,
-        daysSinceLastModified: null,
-        lastCommitHash: null,
-        isGenerated: false
-      };
+      const file1: FileNode = createMockFile({ name: 'file1.ts', path: 'file1.ts' });
+      const file2: FileNode = createMockFile({ name: 'file2.ts', path: 'file2.ts' });
 
       const root: DirectoryNode = {
         type: 'directory',
@@ -199,23 +152,7 @@ describe('HierarchicalLayoutStrategy', () => {
     });
 
     it('should layout nested directories recursively', () => {
-      const file: FileNode = {
-        type: 'file',
-        name: 'nested.ts',
-        path: 'subdir/nested.ts',
-        extension: 'ts',
-        loc: 100,
-        lastModified: null,
-        lastAuthor: null,
-        commitCount: null,
-        contributorCount: null,
-        firstCommitDate: null,
-        recentLinesChanged: null,
-        avgLinesPerCommit: null,
-        daysSinceLastModified: null,
-        lastCommitHash: null,
-        isGenerated: false
-      };
+      const file: FileNode = createMockFile({ name: 'nested.ts', path: 'subdir/nested.ts' });
 
       const subdir: DirectoryNode = {
         type: 'directory',
@@ -245,23 +182,7 @@ describe('HierarchicalLayoutStrategy', () => {
     });
 
     it('should respect parent layout reference', () => {
-      const file: FileNode = {
-        type: 'file',
-        name: 'test.ts',
-        path: 'test.ts',
-        extension: 'ts',
-        loc: 100,
-        lastModified: null,
-        lastAuthor: null,
-        commitCount: null,
-        contributorCount: null,
-        firstCommitDate: null,
-        recentLinesChanged: null,
-        avgLinesPerCommit: null,
-        daysSinceLastModified: null,
-        lastCommitHash: null,
-        isGenerated: false
-      };
+      const file: FileNode = createMockFile({ name: 'test.ts', path: 'test.ts' });
 
       const root: DirectoryNode = {
         type: 'directory',
@@ -270,7 +191,7 @@ describe('HierarchicalLayoutStrategy', () => {
         children: [file]
       };
 
-      const mockParent: any = { node: {}, position: new THREE.Vector3(0, 0, 0) };
+      const mockParent: LayoutNode = { node: {} as unknown as DirectoryNode, position: new THREE.Vector3(0, 0, 0) };
       const position = new THREE.Vector3(0, 10, 0);
       const nodes = layoutEngine.layoutTree(root, position, 0, 0, Math.PI * 2, mockParent);
 

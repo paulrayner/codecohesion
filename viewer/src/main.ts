@@ -1,14 +1,12 @@
 import { TreeVisualizer } from './TreeVisualizer';
-import { RepositorySnapshot, FileNode, DirectoryNode, TreeNode, TimelineData, TimelineDataV2 } from './types';
+import { RepositorySnapshot, FileNode, DirectoryNode, TreeNode, TimelineData, TimelineDataV2, CommitSnapshot } from './types';
 import { FILE_COLORS, DIRECTORY_COLOR } from './colorScheme';
 import { ColorMode, getLegendItems, getColorModeName, getColorForFile, assignAuthorColors, calculateLastModifiedIntervals, calculateLocIntervals, isUsingPercentileIntervals } from './colorModeManager';
-import { DeltaReplayController } from './DeltaReplayController';
+import { DeltaReplayController, CommitEvent, PlayStateEvent } from './DeltaReplayController';
 import { couplingLoader } from './couplingLoader';
-import { HierarchicalLayoutStrategy } from './HierarchicalLayoutStrategy';
-import { ForceDirectedLayoutStrategy } from './ForceDirectedLayoutStrategy';
+import { Cluster, CouplingEdge } from './coupling-types';
 import { calculateDirectoryStats, calculateMaxDepth, countDirectories, collectModificationDates, collectLocValues } from './lib/tree-stats';
 import { buildCommitIndex, buildPathIndex } from './lib/tree-indexers';
-import { findFileInTree } from './lib/tree-utils';
 import { getBaseRepoName } from './lib/repo-utils';
 import { buildFileDetailsHTML } from './lib/html-builders/file-details';
 import { buildDirectoryDetailsHTML } from './lib/html-builders/directory-details';
@@ -25,52 +23,19 @@ import { createLegendItem } from './lib/legend-adapter';
 import { determineFileToLoad, detectDataFormat, extractSnapshot } from './lib/data-loader';
 import { buildVisualizerConfig, SavedPreferences, createLayoutStrategy } from './lib/visualizer-config';
 import { applyVisualizerConfig } from './lib/visualizer-adapter';
-
-type BrowserType = 'chrome' | 'firefox' | 'edge' | 'safari' | 'unknown';
-
-const WEBGL_HELP_MESSAGES: Record<BrowserType, string> = {
-  chrome: `
-    <strong style="color: #ccc;">To fix in Chrome:</strong><br>
-    1. Go to <code style="background: #333; padding: 2px 6px; border-radius: 3px;">chrome://settings/system</code><br>
-    2. Enable "Use hardware acceleration when available"<br>
-    3. Restart Chrome
-  `,
-  firefox: `
-    <strong style="color: #ccc;">To fix in Firefox:</strong><br>
-    1. Go to <code style="background: #333; padding: 2px 6px; border-radius: 3px;">about:preferences</code><br>
-    2. Scroll to Performance<br>
-    3. Enable "Use hardware acceleration when available"<br>
-    4. Restart Firefox
-  `,
-  edge: `
-    <strong style="color: #ccc;">To fix in Edge:</strong><br>
-    1. Go to <code style="background: #333; padding: 2px 6px; border-radius: 3px;">edge://settings/system</code><br>
-    2. Enable "Use hardware acceleration when available"<br>
-    3. Restart Edge
-  `,
-  safari: `
-    <strong style="color: #ccc;">To fix in Safari:</strong><br>
-    WebGL should be enabled by default. Try restarting Safari or your Mac.<br>
-    If the issue persists, check System Settings → Displays for GPU issues.
-  `,
-  unknown: `
-    <strong style="color: #ccc;">To fix:</strong><br>
-    Enable hardware acceleration in your browser settings and restart the browser.
-  `,
-};
-
-function detectBrowser(userAgent: string): BrowserType {
-  if (userAgent.includes('Edg')) return 'edge';
-  if (userAgent.includes('Chrome')) return 'chrome';
-  if (userAgent.includes('Firefox')) return 'firefox';
-  if (userAgent.includes('Safari')) return 'safari';
-  return 'unknown';
-}
-
-function getBrowserSpecificWebGLHelp(): string {
-  const browser = detectBrowser(navigator.userAgent);
-  return WEBGL_HELP_MESSAGES[browser];
-}
+import { AppState, createAppState } from './app/AppState';
+import { BrowserType, WEBGL_HELP_MESSAGES, detectBrowser, getBrowserSpecificWebGLHelp } from './lib/webgl-error';
+import { REPO_GITHUB_URLS, getGitHubInfo, getGitHubFileUrl, getGitHubDirUrl } from './lib/github-links';
+import { countGeneratedFiles, filterGeneratedFiles } from './lib/generated-files';
+import {
+  ProcessMode,
+  buildProcessRequest,
+  validateProcessInput,
+  startProcessJob,
+  subscribeToProgress,
+  extractRepoName,
+  ProgressEvent,
+} from './lib/process-client';
 
 /**
  * Get list of available repositories (base names only, no -timeline variants)
@@ -123,7 +88,7 @@ async function checkTimelineExists(repoName: string): Promise<boolean> {
 /**
  * Load repository data (supports both static and timeline formats)
  */
-async function loadData(repoName: string = 'gource'): Promise<RepositorySnapshot | TimelineData> {
+async function loadData(repoName: string = 'gource'): Promise<RepositorySnapshot | TimelineData | TimelineDataV2> {
   const response = await fetch(`./data/${repoName}.json`);
 
   if (!response.ok) {
@@ -134,61 +99,10 @@ async function loadData(repoName: string = 'gource'): Promise<RepositorySnapshot
 }
 
 /**
- * Count generated files in tree
- */
-function countGeneratedFiles(tree: DirectoryNode): number {
-  let count = 0;
-
-  function countNode(node: TreeNode): void {
-    if (node.type === 'file') {
-      if (node.isGenerated) {
-        count++;
-      }
-    } else {
-      node.children.forEach(child => countNode(child));
-    }
-  }
-
-  countNode(tree);
-  return count;
-}
-
-/**
- * Filter tree to exclude generated files
- * Returns a new tree with generated files removed
- */
-function filterGeneratedFiles(tree: DirectoryNode): DirectoryNode {
-  function filterNode(node: TreeNode): TreeNode | null {
-    if (node.type === 'file') {
-      // Exclude file if marked as generated
-      return node.isGenerated ? null : node;
-    } else {
-      // Directory: recursively filter children
-      const filteredChildren = node.children
-        .map(child => filterNode(child))
-        .filter((child): child is TreeNode => child !== null);
-
-      // Return directory only if it has children after filtering
-      if (filteredChildren.length === 0) {
-        return null;
-      }
-
-      return {
-        ...node,
-        children: filteredChildren
-      };
-    }
-  }
-
-  const filtered = filterNode(tree);
-  return filtered as DirectoryNode; // Root directory always exists
-}
-
-/**
  * Update UI with repository info
  * (Repository name is now shown in dropdown only, no separate display)
  */
-function updateHeader(snapshot: RepositorySnapshot) {
+function updateHeader(_snapshot: RepositorySnapshot) {
   // Repository name removed from header - shown in dropdown instead
 }
 
@@ -202,9 +116,9 @@ function showFileDetails(file: FileNode, handleCommitHighlighting: boolean = fal
     fileName: file.name,
     filePath: file.path,
     handleCommitHighlighting,
-    highlightCommitEnabled,
+    highlightCommitEnabled: appState.selection.highlightCommitEnabled,
     lastCommitHash: file.lastCommitHash,
-    commitIndexSize: commitToFilesIndex.size
+    commitIndexSize: appState.selection.commitToFilesIndex.size
   });
 
   const panel = document.getElementById('info-panel');
@@ -216,26 +130,26 @@ function showFileDetails(file: FileNode, handleCommitHighlighting: boolean = fal
   nameEl.textContent = file.name;
 
   // Get GitHub link if available
-  const baseRepoName = getBaseRepoName(currentRepoBaseName);
+  const baseRepoName = getBaseRepoName(appState.repo.currentRepoBaseName);
   const githubFileUrl = getGitHubFileUrl(baseRepoName, file.path);
 
   // Prepare commit info for HTML builder
   let commitInfo: { commitHashStr: string; message: string; siblings: FileNode[] } | null = null;
 
   // Handle commit sibling highlighting with toggle behavior (only on click, not hover)
-  if (handleCommitHighlighting && highlightCommitEnabled && file.lastCommitHash) {
+  if (handleCommitHighlighting && appState.selection.highlightCommitEnabled && file.lastCommitHash) {
     console.log('✅ Commit highlighting conditions met');
     // Check if clicking on a file that's part of the currently highlighted commit
-    if (currentHighlightedCommit === file.lastCommitHash) {
+    if (appState.selection.currentHighlightedCommit === file.lastCommitHash) {
       console.log('🔄 Toggling OFF - same commit clicked again');
       // Toggle OFF - clear highlighting
-      if (currentVisualizer) {
-        currentVisualizer.clearHighlight();
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.clearHighlight();
       }
-      currentHighlightedCommit = null;
+      appState.selection.currentHighlightedCommit = null;
     } else {
       // New commit or first time - show highlighting
-      const commitSiblings = commitToFilesIndex.get(file.lastCommitHash) || [];
+      const commitSiblings = appState.selection.commitToFilesIndex.get(file.lastCommitHash) || [];
       const otherFiles = commitSiblings.filter(f => f.path !== file.path);
       console.log('📝 Commit siblings found:', {
         totalSiblings: commitSiblings.length,
@@ -244,7 +158,7 @@ function showFileDetails(file: FileNode, handleCommitHighlighting: boolean = fal
       });
 
       // Get commit message if available
-      const commitMessage = currentSnapshot?.commitMessages?.[file.lastCommitHash];
+      const commitMessage = appState.visualizer.currentSnapshot?.commitMessages?.[file.lastCommitHash];
       const commitHashStr = file.lastCommitHash.substring(0, 7);
 
       if (commitMessage || otherFiles.length > 0) {
@@ -256,27 +170,27 @@ function showFileDetails(file: FileNode, handleCommitHighlighting: boolean = fal
       }
 
       // Apply visual highlighting to all files in the commit (including the selected file)
-      if (currentVisualizer) {
+      if (appState.visualizer.currentVisualizer) {
         const allCommitFiles = commitSiblings.map(f => f.path);
-        currentVisualizer.highlightFiles(allCommitFiles);
+        appState.visualizer.currentVisualizer.highlightFiles(allCommitFiles);
       }
-      currentHighlightedCommit = file.lastCommitHash;
+      appState.selection.currentHighlightedCommit = file.lastCommitHash;
     }
   } else {
     // Clear highlighting if mode is off
     console.log('❌ Commit highlighting skipped:', {
       handleCommitHighlighting,
-      highlightCommitEnabled,
+      highlightCommitEnabled: appState.selection.highlightCommitEnabled,
       hasCommitHash: !!file.lastCommitHash
     });
-    if (currentVisualizer) {
-      currentVisualizer.clearHighlight();
+    if (appState.visualizer.currentVisualizer) {
+      appState.visualizer.currentVisualizer.clearHighlight();
     }
-    currentHighlightedCommit = null;
+    appState.selection.currentHighlightedCommit = null;
   }
 
   // Prepare clustering info for HTML builder
-  let clusterInfo: { cluster: any; topEdges: any[] } | null = null;
+  let clusterInfo: { cluster: Cluster; topEdges: CouplingEdge[] } | null = null;
 
   // Add coupling analysis section if in cluster mode and data is loaded
   if (couplingLoader.isLoaded()) {
@@ -388,7 +302,7 @@ function showDirectoryDetails(dir: DirectoryNode) {
   const authorStr = mostRecentAuthor || 'Unknown';
 
   // Get GitHub link if available
-  const baseRepoName = getBaseRepoName(currentRepoBaseName);
+  const baseRepoName = getBaseRepoName(appState.repo.currentRepoBaseName);
   const githubDirUrl = getGitHubDirUrl(baseRepoName, dir.path);
 
   // Build HTML using pure function
@@ -414,60 +328,10 @@ function showDirectoryDetails(dir: DirectoryNode) {
 }
 
 /**
- * Show tooltip on hover
- */
-function showTooltip(node: TreeNode | null, event?: MouseEvent) {
-  const tooltip = document.getElementById('tooltip');
-  if (!tooltip) return;
-
-  if (!node || !event) {
-    tooltip.style.display = 'none';
-    return;
-  }
-
-  if (node.type === 'file') {
-    const lastModified = node.lastModified
-      ? new Date(node.lastModified).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-      : 'Unknown';
-    const author = node.lastAuthor || 'Unknown';
-    tooltip.textContent = `📄 ${node.name} | ${node.loc} LOC | ${author} | ${lastModified}`;
-  } else {
-    // Find most recent file in directory
-    let mostRecentDate: string | null = null;
-    let mostRecentAuthor: string | null = null;
-    const findMostRecent = (n: TreeNode) => {
-      if (n.type === 'file' && n.lastModified) {
-        if (!mostRecentDate || new Date(n.lastModified) > new Date(mostRecentDate)) {
-          mostRecentDate = n.lastModified;
-          mostRecentAuthor = n.lastAuthor;
-        }
-      } else if (n.type === 'directory') {
-        for (const child of n.children) {
-          findMostRecent(child);
-        }
-      }
-    };
-    for (const child of node.children) {
-      findMostRecent(child);
-    }
-
-    const lastModified = mostRecentDate
-      ? new Date(mostRecentDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-      : 'Unknown';
-    const author = mostRecentAuthor || 'Unknown';
-    tooltip.textContent = `📁 ${node.name} | ${node.children.length} items | ${author} | ${lastModified}`;
-  }
-
-  tooltip.style.display = 'block';
-  tooltip.style.left = `${event.clientX + 15}px`;
-  tooltip.style.top = `${event.clientY + 15}px`;
-}
-
-/**
  * Count visible files and LOC (respecting current filters)
  */
 function countVisibleStats(tree: TreeNode): { files: number; loc: number } {
-  if (!currentVisualizer || !currentSnapshot) {
+  if (!appState.visualizer.currentVisualizer || !appState.visualizer.currentSnapshot) {
     return { files: 0, loc: 0 };
   }
 
@@ -478,9 +342,9 @@ function countVisibleStats(tree: TreeNode): { files: number; loc: number } {
   const processNode = (node: TreeNode) => {
     if (node.type === 'file') {
       // Check if this file matches the current filter
-      if (currentVisualizer!.hasActiveFilters()) {
+      if (appState.visualizer.currentVisualizer!.hasActiveFilters()) {
         // Get file's category and check if it's in active filters
-        const activeCategories = currentVisualizer!.getActiveFilterCategories();
+        const activeCategories = appState.visualizer.currentVisualizer!.getActiveFilterCategories();
         const fileColorInfo = getColorForFile(node, colorMode);
         if (activeCategories.includes(fileColorInfo.name)) {
           files++;
@@ -514,7 +378,7 @@ function populateStats(snapshot: RepositorySnapshot) {
  */
 function updateStatsDisplay(snapshot: RepositorySnapshot) {
   // Check if filters are active
-  const hasFilters = currentVisualizer?.hasActiveFilters() || false;
+  const hasFilters = appState.visualizer.currentVisualizer?.hasActiveFilters() || false;
 
   let visibleFiles = snapshot.stats.totalFiles;
   let visibleLoc = snapshot.stats.totalLoc;
@@ -634,26 +498,26 @@ function updateHideGeneratedCheckbox(snapshot: RepositorySnapshot) {
  * Call this after loading a repository to visualize with or without generated files
  */
 function applyGeneratedFileFilter() {
-  if (!currentSnapshot || !currentVisualizer) return;
+  if (!appState.visualizer.currentSnapshot || !appState.visualizer.currentVisualizer) return;
 
   const checkbox = document.getElementById('hide-generated-checkbox') as HTMLInputElement;
   const shouldHide = checkbox && checkbox.checked;
 
-  const generatedCount = countGeneratedFiles(currentSnapshot.tree);
+  const generatedCount = countGeneratedFiles(appState.visualizer.currentSnapshot.tree);
 
   if (shouldHide && generatedCount > 0) {
     console.log(`Hiding ${generatedCount} generated files`);
-    const filteredTree = filterGeneratedFiles(currentSnapshot.tree);
-    currentVisualizer.visualize(filteredTree);
+    const filteredTree = filterGeneratedFiles(appState.visualizer.currentSnapshot.tree);
+    appState.visualizer.currentVisualizer.visualize(filteredTree);
 
     // Update stats to reflect filtered tree
     populateStatsForFilteredTree(filteredTree);
   } else {
     console.log(`Showing all files (${generatedCount} generated files present)`);
-    currentVisualizer.visualize(currentSnapshot.tree);
+    appState.visualizer.currentVisualizer.visualize(appState.visualizer.currentSnapshot.tree);
 
     // Restore original stats
-    populateStats(currentSnapshot);
+    populateStats(appState.visualizer.currentSnapshot);
   }
 }
 
@@ -823,63 +687,7 @@ function hideLoading() {
   }
 }
 
-let currentVisualizer: TreeVisualizer | null = null;
-let currentSnapshot: RepositorySnapshot | null = null;
-let currentTimelineData: TimelineData | null = null; // Timeline V1 format if loaded
-let currentDeltaController: DeltaReplayController | null = null; // Timeline controller
-let commitToFilesIndex: Map<string, FileNode[]> = new Map();
-let highlightCommitEnabled: boolean = true;
-let currentHighlightedCommit: string | null = null;
-
-// Track clicked (selected) nodes to persist details panel
-let lastClickedFile: FileNode | null = null;
-let lastClickedDir: DirectoryNode | null = null;
-
-// Mode switcher state
-let currentRepoBaseName: string = '';
-let timelineAvailable: boolean = false;
-
-// Timeline playback state
-let timelineIndex: number = 0;
-let timelinePlaying: boolean = false;
-let timelineIntervalId: number | null = null;
-let timelineSpeed: number = 1; // 1x speed
-
-// GitHub repository URL mapping
-const REPO_GITHUB_URLS: Record<string, { owner: string; repo: string; url: string }> = {
-  'gource': { owner: 'acaudwell', repo: 'Gource', url: 'https://github.com/acaudwell/Gource' },
-  'cbioportal': { owner: 'cBioPortal', repo: 'cbioportal', url: 'https://github.com/cBioPortal/cbioportal' },
-  'cbioportal-frontend': { owner: 'cBioPortal', repo: 'cbioportal-frontend', url: 'https://github.com/cBioPortal/cbioportal-frontend' },
-  'react': { owner: 'facebook', repo: 'react', url: 'https://github.com/facebook/react' },
-  'codecohesion': { owner: 'paulrayner', repo: 'codecohesion', url: 'https://github.com/paulrayner/codecohesion' }
-};
-
-/**
- * Get GitHub info for a repo
- */
-function getGitHubInfo(repoBaseName: string) {
-  return REPO_GITHUB_URLS[repoBaseName] || null;
-}
-
-/**
- * Build GitHub file URL (HEAD only for now)
- */
-function getGitHubFileUrl(repoBaseName: string, filePath: string): string | null {
-  const info = getGitHubInfo(repoBaseName);
-  if (!info) return null;
-  return `${info.url}/blob/HEAD/${filePath}`;
-}
-
-/**
- * Build GitHub directory URL (HEAD only)
- */
-function getGitHubDirUrl(repoBaseName: string, dirPath: string): string | null {
-  const info = getGitHubInfo(repoBaseName);
-  if (!info) return null;
-  // Root directory case
-  if (!dirPath || dirPath === '') return `${info.url}/tree/HEAD`;
-  return `${info.url}/tree/HEAD/${dirPath}`;
-}
+const appState: AppState = createAppState();
 
 /**
  * Update repo GitHub link element
@@ -900,17 +708,9 @@ function updateRepoGitHubLink(repoBaseName: string): void {
   }
 }
 
-let pathToFileIndex: Map<string, FileNode> = new Map();
-
 // Timeline compatible color modes (only modes that work without lifetime analytics)
 // Note: 'cluster' mode is HEAD-only since clusters represent current architectural boundaries
 const TIMELINE_COMPATIBLE_MODES: ColorMode[] = ['fileType', 'lastModified', 'author'];
-
-// Store original color mode when entering timeline mode
-let savedColorModeBeforeTimeline: ColorMode | null = null;
-
-// Store original option text (to avoid appending " (requires HEAD analysis)" multiple times)
-const originalColorModeOptionText = new Map<string, string>();
 
 /**
  * Enable Timeline mode UI changes (both V1 and V2)
@@ -937,7 +737,7 @@ function enableTimelineMode() {
   const colorModeSelector = document.getElementById('color-mode-selector') as HTMLSelectElement;
   if (colorModeSelector) {
     // Save current mode
-    savedColorModeBeforeTimeline = colorModeSelector.value as ColorMode;
+    appState.timelineMode.savedColorModeBeforeTimeline = colorModeSelector.value as ColorMode;
 
     // Remove incompatible options from dropdown
     const optionsToRemove: HTMLOptionElement[] = [];
@@ -945,8 +745,8 @@ function enableTimelineMode() {
       const mode = option.value as ColorMode;
 
       // Store original option element on first run
-      if (!originalColorModeOptionText.has(mode)) {
-        originalColorModeOptionText.set(mode, option.outerHTML);
+      if (!appState.timelineMode.originalColorModeOptionText.has(mode)) {
+        appState.timelineMode.originalColorModeOptionText.set(mode, option.outerHTML);
       }
 
       if (!TIMELINE_COMPATIBLE_MODES.includes(mode)) {
@@ -958,13 +758,13 @@ function enableTimelineMode() {
     optionsToRemove.forEach(option => option.remove());
 
     // If current mode is incompatible, switch to fileType
-    if (!TIMELINE_COMPATIBLE_MODES.includes(savedColorModeBeforeTimeline)) {
+    if (!TIMELINE_COMPATIBLE_MODES.includes(appState.timelineMode.savedColorModeBeforeTimeline)) {
       colorModeSelector.value = 'fileType';
       localStorage.setItem('colorMode', 'fileType');
-      if (currentVisualizer) {
-        currentVisualizer.setColorMode('fileType');
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.setColorMode('fileType');
       }
-      console.log(`Switched from incompatible mode '${savedColorModeBeforeTimeline}' to 'fileType'`);
+      console.log(`Switched from incompatible mode '${appState.timelineMode.savedColorModeBeforeTimeline}' to 'fileType'`);
     }
   }
 }
@@ -993,8 +793,8 @@ function disableTimelineMode() {
   // Restore all color modes (re-add removed options)
   const colorModeSelector = document.getElementById('color-mode-selector') as HTMLSelectElement;
   if (colorModeSelector) {
-    // Only restore if we actually removed options (i.e., originalColorModeOptionText has data)
-    if (originalColorModeOptionText.size > 0) {
+    // Only restore if we actually removed options (i.e., appState.timelineMode.originalColorModeOptionText has data)
+    if (appState.timelineMode.originalColorModeOptionText.size > 0) {
       // Get list of all color modes that should exist
       const allModes: ColorMode[] = ['fileType', 'lastModified', 'author', 'churn', 'contributors', 'fileAge', 'recentActivity', 'stability', 'recency'];
 
@@ -1003,10 +803,10 @@ function disableTimelineMode() {
       colorModeSelector.innerHTML = '';
 
       for (const mode of allModes) {
-        if (originalColorModeOptionText.has(mode)) {
+        if (appState.timelineMode.originalColorModeOptionText.has(mode)) {
           // Restore from saved HTML
           const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = originalColorModeOptionText.get(mode) || '';
+          tempDiv.innerHTML = appState.timelineMode.originalColorModeOptionText.get(mode) || '';
           const option = tempDiv.firstChild as HTMLOptionElement;
           if (option) {
             colorModeSelector.appendChild(option);
@@ -1015,18 +815,18 @@ function disableTimelineMode() {
       }
 
       // Restore previous color mode if it was changed
-      if (savedColorModeBeforeTimeline && !TIMELINE_COMPATIBLE_MODES.includes(savedColorModeBeforeTimeline)) {
-        colorModeSelector.value = savedColorModeBeforeTimeline;
-        localStorage.setItem('colorMode', savedColorModeBeforeTimeline);
-        if (currentVisualizer) {
-          currentVisualizer.setColorMode(savedColorModeBeforeTimeline);
+      if (appState.timelineMode.savedColorModeBeforeTimeline && !TIMELINE_COMPATIBLE_MODES.includes(appState.timelineMode.savedColorModeBeforeTimeline)) {
+        colorModeSelector.value = appState.timelineMode.savedColorModeBeforeTimeline;
+        localStorage.setItem('colorMode', appState.timelineMode.savedColorModeBeforeTimeline);
+        if (appState.visualizer.currentVisualizer) {
+          appState.visualizer.currentVisualizer.setColorMode(appState.timelineMode.savedColorModeBeforeTimeline);
         }
-        console.log(`Restored color mode to '${savedColorModeBeforeTimeline}'`);
+        console.log(`Restored color mode to '${appState.timelineMode.savedColorModeBeforeTimeline}'`);
       } else {
         // Keep current value if compatible
         colorModeSelector.value = currentValue;
       }
-      savedColorModeBeforeTimeline = null;
+      appState.timelineMode.savedColorModeBeforeTimeline = null;
     }
   }
 }
@@ -1045,11 +845,11 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
     console.log(`Tags: ${data.metadata.tags.length}`);
 
     // Create delta controller
-    currentDeltaController = new DeltaReplayController(data);
-    currentTimelineData = null; // Clear V1 data
+    appState.visualizer.currentDeltaController = new DeltaReplayController(data);
+    appState.visualizer.currentTimelineData = null; // Clear V1 data
 
     // Update loading indicator based on keyframe mode
-    const mode = currentDeltaController.getKeyframeMode();
+    const mode = appState.visualizer.currentDeltaController.getKeyframeMode();
     if (loading) {
       loading.innerHTML = `
         <div class="spinner"></div>
@@ -1059,7 +859,7 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
     }
 
     // Generate keyframes (adaptive strategy)
-    await currentDeltaController.generateKeyframes((current, total) => {
+    await appState.visualizer.currentDeltaController.generateKeyframes((current, total) => {
       const progressText = document.getElementById('progress-text');
       if (progressText) {
         progressText.textContent = `${current} / ${total}`;
@@ -1067,7 +867,7 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
     });
 
     // Log keyframe stats
-    const stats = currentDeltaController.getKeyframeStats();
+    const stats = appState.visualizer.currentDeltaController.getKeyframeStats();
     console.log(`📊 Keyframe strategy: ${stats.mode}`);
     console.log(`   Base keyframes: ${stats.baseKeyframes}`);
     console.log(`   Total commits: ${stats.totalCommits}`);
@@ -1079,7 +879,7 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
       const headData = await loadData(staticName);
 
       if ('tree' in headData) {
-        const validation = currentDeltaController.validateFinalTree(headData as RepositorySnapshot);
+        const validation = appState.visualizer.currentDeltaController.validateFinalTree(headData as RepositorySnapshot);
 
         if (!validation.isValid) {
           console.error(`\n❌ VALIDATION FAILED!`);
@@ -1092,7 +892,7 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
     }
 
     // Get first commit's tree
-    const firstTree = currentDeltaController.getTreeAtCommit(0);
+    const firstTree = appState.visualizer.currentDeltaController.getTreeAtCommit(0);
     if (!firstTree) {
       throw new Error('Failed to generate first keyframe');
     }
@@ -1113,10 +913,10 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
       }
     };
 
-    currentSnapshot = tempSnapshot;
+    appState.visualizer.currentSnapshot = tempSnapshot;
 
     // Build path index from first tree
-    pathToFileIndex = buildPathIndex(firstTree);
+    appState.selection.pathToFileIndex = buildPathIndex(firstTree);
 
     // Initialize visualizer
     const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -1124,8 +924,8 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
       throw new Error('Canvas element not found');
     }
 
-    if (!currentVisualizer) {
-      currentVisualizer = new TreeVisualizer(canvas);
+    if (!appState.visualizer.currentVisualizer) {
+      appState.visualizer.currentVisualizer = new TreeVisualizer(canvas);
 
       // Build configuration from saved preferences
       const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -1139,33 +939,33 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
 
       // Apply configuration with event handlers
       applyVisualizerConfig(
-        currentVisualizer,
+        appState.visualizer.currentVisualizer,
         config,
         couplingLoader.isLoaded() ? couplingLoader : null,
         {
           onFileClick: (file) => {
             // Check if we're about to toggle OFF highlighting (clicking same file twice)
-            const wasHighlighted = currentHighlightedCommit === file.lastCommitHash;
+            const wasHighlighted = appState.selection.currentHighlightedCommit === file.lastCommitHash;
 
-            lastClickedFile = file;
-            lastClickedDir = null;
+            appState.selection.lastClickedFile = file;
+            appState.selection.lastClickedDir = null;
             showFileDetails(file, true); // true = handle commit highlighting on click
 
             // If we toggled OFF highlighting, clear the selection to restore hover mode
-            if (wasHighlighted && currentHighlightedCommit === null) {
-              lastClickedFile = null;
-              lastClickedDir = null;
+            if (wasHighlighted && appState.selection.currentHighlightedCommit === null) {
+              appState.selection.lastClickedFile = null;
+              appState.selection.lastClickedDir = null;
             }
           },
           onDirClick: (dir) => {
-            lastClickedDir = dir;
-            lastClickedFile = null;
+            appState.selection.lastClickedDir = dir;
+            appState.selection.lastClickedFile = null;
             showDirectoryDetails(dir);
           },
-          onHover: (node, event) => {
+          onHover: (node, _event) => {
             if (!node) {
               // Only hide panel if nothing is currently clicked/selected
-              if (!lastClickedFile && !lastClickedDir) {
+              if (!appState.selection.lastClickedFile && !appState.selection.lastClickedDir) {
                 const panel = document.getElementById('info-panel');
                 if (panel) panel.classList.remove('visible');
               }
@@ -1174,7 +974,7 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
 
             // Only show hover details if nothing is currently clicked/pinned
             // When a file is clicked, it stays pinned until clicked again
-            if (!lastClickedFile && !lastClickedDir) {
+            if (!appState.selection.lastClickedFile && !appState.selection.lastClickedDir) {
               // Show details based on node type (temporary preview, doesn't affect clicked state)
               if (node.type === 'file') {
                 // In cluster mode, don't show right panel - cluster card is shown in 3D
@@ -1190,15 +990,15 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
         }
       );
 
-      currentVisualizer.start();
+      appState.visualizer.currentVisualizer.start();
     } else {
       // Update coupling loader if visualizer already exists
-      currentVisualizer.setCouplingLoader(couplingLoader.isLoaded() ? couplingLoader : null);
+      appState.visualizer.currentVisualizer.setCouplingLoader(couplingLoader.isLoaded() ? couplingLoader : null);
     }
 
     // Load first tree
-    currentVisualizer.visualize(firstTree);
-    currentVisualizer.setTimelineMode('delta');
+    appState.visualizer.currentVisualizer.visualize(firstTree);
+    appState.visualizer.currentVisualizer.setTimelineMode('v2');
 
     // Set up V2 playback controls
     setupTimelineControls();
@@ -1207,8 +1007,8 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
 
     // Display initial commit info (index 0)
     // The onCommit callback only fires on user interaction, not on initial load
-    if (currentDeltaController) {
-      const initialCommit = currentDeltaController.getCommitAtIndex(0);
+    if (appState.visualizer.currentDeltaController) {
+      const initialCommit = appState.visualizer.currentDeltaController.getCommitAtIndex(0);
       if (initialCommit) {
         const commitInfo = document.getElementById('commit-info');
         if (commitInfo) {
@@ -1254,10 +1054,10 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
         }
 
         // Highlight files for initial commit
-        highlightTimelineCommitFiles(initialCommit, 0);
+        highlightTimelineCommitFiles(initialCommit);
 
         // Update repository stats panel with initial tree state
-        const totalCommits = currentDeltaController.getTotalCommits();
+        const totalCommits = appState.visualizer.currentDeltaController.getTotalCommits();
         updateStatsForTree(firstTree, 0, totalCommits);
       }
     }
@@ -1292,7 +1092,7 @@ async function loadTimeline(data: TimelineDataV2, repoName: string) {
  * Set up Timeline playback controls
  */
 function setupTimelineControls() {
-  if (!currentDeltaController) return;
+  if (!appState.visualizer.currentDeltaController) return;
 
   console.log('Setting up Timeline controls...');
 
@@ -1301,24 +1101,24 @@ function setupTimelineControls() {
   let isFirstCommit = false;
 
   // Listen for commit changes
-  currentDeltaController.on('commit', ({ index, commit, tree }: any) => {
+  appState.visualizer.currentDeltaController.on('commit', ({ index, commit, tree }: CommitEvent) => {
     const perfStart = performance.now();
     const timings: Record<string, number> = {};
 
     // Get previous tree for ghost rendering
-    const prevTree = index > 0 ? currentDeltaController?.getTreeAtCommit(index - 1) : null;
+    const prevTree = index > 0 ? appState.visualizer.currentDeltaController?.getTreeAtCommit(index - 1) : null;
 
     // Update visualizer with current tree
-    if (currentVisualizer && tree) {
+    if (appState.visualizer.currentVisualizer && tree) {
       const t0 = performance.now();
 
       if (isFirstCommit) {
         // First commit: do full visualization with camera reset
-        currentVisualizer.visualize(tree, true);
+        appState.visualizer.currentVisualizer.visualize(tree, true);
         isFirstCommit = false;
       } else {
         // Subsequent commits: use incremental update to preserve physics state
-        currentVisualizer.updateTreeIncremental(
+        appState.visualizer.currentVisualizer.updateTreeIncremental(
           tree,
           commit.changes.filesAdded,
           commit.changes.filesModified,
@@ -1329,19 +1129,19 @@ function setupTimelineControls() {
       timings.visualize = performance.now() - t0;
 
       const t1 = performance.now();
-      pathToFileIndex = buildPathIndex(tree);
+      appState.selection.pathToFileIndex = buildPathIndex(tree);
       timings.pathIndex = performance.now() - t1;
 
       // Render ghosts for deleted files AFTER visualize (Timeline only)
       if (commit.changes.filesDeleted.length > 0 && prevTree) {
         const t2 = performance.now();
-        currentVisualizer.renderDeletedFiles(commit.changes.filesDeleted, prevTree);
+        appState.visualizer.currentVisualizer.renderDeletedFiles(commit.changes.filesDeleted, prevTree);
         timings.ghosts = performance.now() - t2;
       }
 
       const t3 = performance.now();
       // Update repository stats panel with current tree state
-      const totalCommits = currentDeltaController?.getTotalCommits() || 0;
+      const totalCommits = appState.visualizer.currentDeltaController?.getTotalCommits() || 0;
       updateStatsForTree(tree, index, totalCommits);
       timings.stats = performance.now() - t3;
     }
@@ -1392,7 +1192,7 @@ function setupTimelineControls() {
 
     // Highlight files changed in this commit
     const t4 = performance.now();
-    highlightTimelineCommitFiles(commit, index);
+    highlightTimelineCommitFiles(commit);
     timings.highlight = performance.now() - t4;
 
     // Update timeline UI
@@ -1417,11 +1217,11 @@ function setupTimelineControls() {
   const playPauseBtn = document.getElementById('play-pause-btn');
   if (playPauseBtn) {
     playPauseBtn.onclick = () => {
-      currentDeltaController?.togglePlay();
+      appState.visualizer.currentDeltaController?.togglePlay();
     };
   }
 
-  currentDeltaController.on('playStateChanged', ({ isPlaying }: any) => {
+  appState.visualizer.currentDeltaController.on('playStateChanged', ({ isPlaying }: PlayStateEvent) => {
     if (playPauseBtn) {
       playPauseBtn.textContent = isPlaying ? '⏸ Pause' : '▶ Play';
     }
@@ -1432,17 +1232,17 @@ function setupTimelineControls() {
   const stepForwardBtn = document.getElementById('step-forward-btn');
 
   if (stepBackBtn) {
-    stepBackBtn.onclick = () => currentDeltaController?.stepBackward();
+    stepBackBtn.onclick = () => appState.visualizer.currentDeltaController?.stepBackward();
   }
 
   if (stepForwardBtn) {
-    stepForwardBtn.onclick = () => currentDeltaController?.stepForward();
+    stepForwardBtn.onclick = () => appState.visualizer.currentDeltaController?.stepForward();
   }
 
   // Go to start/end
   const goToStartBtn = document.getElementById('go-to-start-btn');
   if (goToStartBtn) {
-    goToStartBtn.onclick = () => currentDeltaController?.goToStart();
+    goToStartBtn.onclick = () => appState.visualizer.currentDeltaController?.goToStart();
   }
 
   // Speed control
@@ -1450,7 +1250,7 @@ function setupTimelineControls() {
   if (speedSelect) {
     speedSelect.onchange = () => {
       const speed = parseInt(speedSelect.value);
-      currentDeltaController?.setSpeed(speed);
+      appState.visualizer.currentDeltaController?.setSpeed(speed);
     };
   }
 
@@ -1459,7 +1259,7 @@ function setupTimelineControls() {
   if (sliderEl) {
     sliderEl.oninput = () => {
       const index = parseInt(sliderEl.value);
-      currentDeltaController?.seekToCommit(index);
+      appState.visualizer.currentDeltaController?.seekToCommit(index);
     };
   }
 
@@ -1469,13 +1269,13 @@ function setupTimelineControls() {
     let isDragging = false;
 
     const seekToPosition = (clientX: number) => {
-      if (!currentDeltaController) return;
+      if (!appState.visualizer.currentDeltaController) return;
       const rect = scrubber.getBoundingClientRect();
       const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
       const percentage = x / rect.width;
-      const totalCommits = currentDeltaController.getTotalCommits();
+      const totalCommits = appState.visualizer.currentDeltaController.getTotalCommits();
       const targetIndex = Math.floor(percentage * (totalCommits - 1));
-      currentDeltaController.seekToCommit(targetIndex);
+      appState.visualizer.currentDeltaController.seekToCommit(targetIndex);
     };
 
     scrubber.addEventListener('mousedown', (e) => {
@@ -1502,7 +1302,7 @@ function setupTimelineControls() {
  * Update Timeline UI elements
  */
 function updateTimelineUI(index: number) {
-  if (!currentDeltaController) return;
+  if (!appState.visualizer.currentDeltaController) return;
 
   const currentEl = document.getElementById('timeline-commit-index');
   const totalEl = document.getElementById('timeline-commit-total');
@@ -1513,12 +1313,12 @@ function updateTimelineUI(index: number) {
   }
 
   if (totalEl) {
-    totalEl.textContent = currentDeltaController.getTotalCommits().toString();
+    totalEl.textContent = appState.visualizer.currentDeltaController.getTotalCommits().toString();
   }
 
   // Update progress bar
   if (progressEl) {
-    const total = currentDeltaController.getTotalCommits();
+    const total = appState.visualizer.currentDeltaController.getTotalCommits();
     const percentage = ((index + 1) / total) * 100;
     progressEl.style.width = `${percentage}%`;
   }
@@ -1534,8 +1334,8 @@ function setupTagNavigation() {
   const tagSelectorContainer = document.getElementById('tag-selector-container') as HTMLElement;
 
   // V2 Timeline format (with DeltaReplayController)
-  if (currentDeltaController) {
-    const metadata = currentDeltaController.getMetadata();
+  if (appState.visualizer.currentDeltaController) {
+    const metadata = appState.visualizer.currentDeltaController.getMetadata();
     const tags = metadata.tags;
 
     if (tags.length === 0) {
@@ -1573,8 +1373,8 @@ function setupTagNavigation() {
         const target = e.target as HTMLSelectElement;
         const selectedTag = target.value;
 
-        if (selectedTag && currentDeltaController) {
-          const success = currentDeltaController.seekToTag(selectedTag);
+        if (selectedTag && appState.visualizer.currentDeltaController) {
+          const success = appState.visualizer.currentDeltaController.seekToTag(selectedTag);
           if (!success) {
             console.warn(`Tag not found: ${selectedTag}`);
           }
@@ -1597,7 +1397,7 @@ function setupTagNavigation() {
  * Render visual tag markers on the timeline scrubber
  */
 function renderTagMarkers() {
-  if (!currentDeltaController) return;
+  if (!appState.visualizer.currentDeltaController) return;
 
   const tagMarkersContainer = document.getElementById('tag-markers');
   if (!tagMarkersContainer) return;
@@ -1605,14 +1405,13 @@ function renderTagMarkers() {
   // Clear existing markers
   tagMarkersContainer.innerHTML = '';
 
-  const totalCommits = currentDeltaController.getTotalCommits();
-  const metadata = currentDeltaController.getMetadata();
+  const totalCommits = appState.visualizer.currentDeltaController.getTotalCommits();
 
   // Find all commits with tags
   const taggedCommits: Array<{ index: number; tags: string[] }> = [];
 
   for (let i = 0; i < totalCommits; i++) {
-    const commit = currentDeltaController.getCommitAtIndex(i);
+    const commit = appState.visualizer.currentDeltaController.getCommitAtIndex(i);
     if (commit && commit.tags.length > 0) {
       taggedCommits.push({ index: i, tags: commit.tags });
     }
@@ -1631,7 +1430,7 @@ function renderTagMarkers() {
     // Make marker clickable to seek
     marker.addEventListener('click', (e) => {
       e.stopPropagation(); // Prevent scrubber click
-      currentDeltaController?.seekToCommit(tagged.index);
+      appState.visualizer.currentDeltaController?.seekToCommit(tagged.index);
     });
 
     tagMarkersContainer.appendChild(marker);
@@ -1642,9 +1441,9 @@ function renderTagMarkers() {
  * Update tag selector to reflect current commit's tags
  */
 function updateTagSelectorForCurrentCommit(index: number) {
-  if (!currentDeltaController) return;
+  if (!appState.visualizer.currentDeltaController) return;
 
-  const commit = currentDeltaController.getCommitAtIndex(index);
+  const commit = appState.visualizer.currentDeltaController.getCommitAtIndex(index);
   const tagSelector = document.getElementById('tag-selector') as HTMLSelectElement;
 
   if (tagSelector && commit) {
@@ -1739,27 +1538,27 @@ async function loadRepository(repoName: string) {
     console.log(`Loading repository: ${repoName}`);
 
     // Store current base repository name
-    currentRepoBaseName = repoName;
+    appState.repo.currentRepoBaseName = repoName;
 
     // Update GitHub link for this repo
     const baseRepoName = getBaseRepoName(repoName);
     updateRepoGitHubLink(baseRepoName);
 
     // Check if timeline data exists
-    timelineAvailable = await checkTimelineExists(repoName);
-    console.log(`Timeline available for ${repoName}: ${timelineAvailable}`);
+    appState.repo.timelineAvailable = await checkTimelineExists(repoName);
+    console.log(`Timeline available for ${repoName}: ${appState.repo.timelineAvailable}`);
 
     // Show/hide mode switcher based on timeline availability
-    updateModeSwitcherVisibility(timelineAvailable);
+    updateModeSwitcherVisibility(appState.repo.timelineAvailable);
 
     // Get selected mode
     const mode = getSelectedMode();
 
     // Determine which file to load and load it
-    let data: any;
+    let data: RepositorySnapshot | TimelineData | TimelineDataV2 | undefined;
     let fileToLoad = repoName;
 
-    const { files, fallbackToHead } = determineFileToLoad(repoName, mode, timelineAvailable);
+    const { files, fallbackToHead } = determineFileToLoad(repoName, mode, appState.repo.timelineAvailable);
 
     if (files.length > 1) {
       // Timeline mode: try files in order
@@ -1795,6 +1594,9 @@ async function loadRepository(repoName: string) {
       data = await loadData(fileToLoad);
     }
 
+    // At this point data is always assigned — either from the loop, the fallback, or the HEAD branch.
+    const loadedData: RepositorySnapshot | TimelineData | TimelineDataV2 = data!;
+
     // Detect format and extract snapshot
     let snapshot: RepositorySnapshot;
 
@@ -1802,44 +1604,44 @@ async function loadRepository(repoName: string) {
     const hasCouplingData = await couplingLoader.tryLoad(fileToLoad);
     updateColorModeOptionsForCoupling(hasCouplingData);
 
-    const format = detectDataFormat(data);
-    const extractedSnapshot = extractSnapshot(data, format);
+    const format = detectDataFormat(loadedData);
+    const extractedSnapshot = extractSnapshot(loadedData, format);
 
-    if (format === 'timeline') {
+    if (format === 'timeline-v2') {
       // Timeline: Full delta format - need to handle specially
       console.log('🎬 Timeline (Full Delta) format detected');
-      await loadTimeline(data as TimelineDataV2, fileToLoad);
+      await loadTimeline(loadedData as TimelineDataV2, fileToLoad);
       return; // Early return - V2 uses different loading path
     } else if (format === 'timeline-v1') {
       // Timeline V1: Sampled format
       console.log('Timeline V1 format detected');
-      currentTimelineData = data;
-      currentDeltaController = null;
+      appState.visualizer.currentTimelineData = loadedData as TimelineData;
+      appState.visualizer.currentDeltaController = null;
       snapshot = extractedSnapshot!;
-      console.log(`Timeline data: ${data.timeline.totalCommits} total commits, ${data.timeline.baseSampling.actualCount} sampled`);
+      console.log(`Timeline data: ${(loadedData as TimelineData).timeline.totalCommits} total commits, ${(loadedData as TimelineData).timeline.baseSampling.actualCount} sampled`);
     } else {
       // Static snapshot format
       console.log('Static snapshot format detected');
-      currentTimelineData = null;
-      currentDeltaController = null;
+      appState.visualizer.currentTimelineData = null;
+      appState.visualizer.currentDeltaController = null;
       snapshot = extractedSnapshot!;
     }
 
-    currentSnapshot = snapshot;
+    appState.visualizer.currentSnapshot = snapshot;
     console.log('Data loaded:', snapshot);
 
     // For static HEAD mode only: disable timeline mode UI
-    if (!currentTimelineData && !currentDeltaController) {
+    if (!appState.visualizer.currentTimelineData && !appState.visualizer.currentDeltaController) {
       disableTimelineMode();
     }
 
     // Build commit hash index
-    commitToFilesIndex = buildCommitIndex(snapshot.tree);
-    console.log(`Built commit index: ${commitToFilesIndex.size} unique commits`);
+    appState.selection.commitToFilesIndex = buildCommitIndex(snapshot.tree);
+    console.log(`Built commit index: ${appState.selection.commitToFilesIndex.size} unique commits`);
 
     // Build path-to-file index for timeline highlighting
-    pathToFileIndex = buildPathIndex(snapshot.tree);
-    console.log(`Built path index: ${pathToFileIndex.size} files`);
+    appState.selection.pathToFileIndex = buildPathIndex(snapshot.tree);
+    console.log(`Built path index: ${appState.selection.pathToFileIndex.size} files`);
 
     // Calculate percentile-based intervals for last modified dates
     const modificationDates = collectModificationDates(snapshot.tree);
@@ -1856,9 +1658,9 @@ async function loadRepository(repoName: string) {
     if (infoPanel) {
       infoPanel.classList.remove('visible');
     }
-    currentHighlightedCommit = null;
-    if (currentVisualizer) {
-      currentVisualizer.clearHighlight();
+    appState.selection.currentHighlightedCommit = null;
+    if (appState.visualizer.currentVisualizer) {
+      appState.visualizer.currentVisualizer.clearHighlight();
     }
 
     updateHeader(snapshot);
@@ -1868,7 +1670,7 @@ async function loadRepository(repoName: string) {
     // Show/hide timeline controls based on format
     const timelineControls = document.getElementById('timeline-controls');
     if (timelineControls) {
-      if (currentTimelineData) {
+      if (appState.visualizer.currentTimelineData) {
         timelineControls.style.display = 'flex';
         // Set up timeline controls (only once per load)
         setupTimelineV1Controls();
@@ -1889,8 +1691,8 @@ async function loadRepository(repoName: string) {
       throw new Error('Canvas element not found');
     }
 
-    if (!currentVisualizer) {
-      currentVisualizer = new TreeVisualizer(canvas);
+    if (!appState.visualizer.currentVisualizer) {
+      appState.visualizer.currentVisualizer = new TreeVisualizer(canvas);
 
       // Build configuration from saved preferences
       const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -1904,33 +1706,33 @@ async function loadRepository(repoName: string) {
 
       // Apply configuration with event handlers
       applyVisualizerConfig(
-        currentVisualizer,
+        appState.visualizer.currentVisualizer,
         config,
         couplingLoader.isLoaded() ? couplingLoader : null,
         {
           onFileClick: (file) => {
             // Check if we're about to toggle OFF highlighting (clicking same file twice)
-            const wasHighlighted = currentHighlightedCommit === file.lastCommitHash;
+            const wasHighlighted = appState.selection.currentHighlightedCommit === file.lastCommitHash;
 
-            lastClickedFile = file;
-            lastClickedDir = null;
+            appState.selection.lastClickedFile = file;
+            appState.selection.lastClickedDir = null;
             showFileDetails(file, true); // true = handle commit highlighting on click
 
             // If we toggled OFF highlighting, clear the selection to restore hover mode
-            if (wasHighlighted && currentHighlightedCommit === null) {
-              lastClickedFile = null;
-              lastClickedDir = null;
+            if (wasHighlighted && appState.selection.currentHighlightedCommit === null) {
+              appState.selection.lastClickedFile = null;
+              appState.selection.lastClickedDir = null;
             }
           },
           onDirClick: (dir) => {
-            lastClickedDir = dir;
-            lastClickedFile = null;
+            appState.selection.lastClickedDir = dir;
+            appState.selection.lastClickedFile = null;
             showDirectoryDetails(dir);
           },
-          onHover: (node, event) => {
+          onHover: (node, _event) => {
             if (!node) {
               // Only hide panel if nothing is currently clicked/selected
-              if (!lastClickedFile && !lastClickedDir) {
+              if (!appState.selection.lastClickedFile && !appState.selection.lastClickedDir) {
                 const panel = document.getElementById('info-panel');
                 if (panel) panel.classList.remove('visible');
               }
@@ -1939,7 +1741,7 @@ async function loadRepository(repoName: string) {
 
             // Only show hover details if nothing is currently clicked/pinned
             // When a file is clicked, it stays pinned until clicked again
-            if (!lastClickedFile && !lastClickedDir) {
+            if (!appState.selection.lastClickedFile && !appState.selection.lastClickedDir) {
               // Show details based on node type (temporary preview, doesn't affect clicked state)
               if (node.type === 'file') {
                 // In cluster mode, don't show right panel - cluster card is shown in 3D
@@ -1956,14 +1758,14 @@ async function loadRepository(repoName: string) {
       );
 
       // Start animation
-      currentVisualizer.start();
+      appState.visualizer.currentVisualizer.start();
     } else {
       // Update coupling loader if visualizer already exists
-      currentVisualizer.setCouplingLoader(couplingLoader.isLoaded() ? couplingLoader : null);
+      appState.visualizer.currentVisualizer.setCouplingLoader(couplingLoader.isLoaded() ? couplingLoader : null);
     }
 
     // Enable timeline mode if loading timeline data (shows all files for highlighting)
-    currentVisualizer.setTimelineMode(currentTimelineData !== null ? 'v1' : 'off');
+    appState.visualizer.currentVisualizer.setTimelineMode(appState.visualizer.currentTimelineData !== null ? 'v1' : 'off');
 
     // Visualize the tree (apply filter if checkbox is checked)
     applyGeneratedFileFilter();
@@ -1987,7 +1789,7 @@ async function loadRepository(repoName: string) {
       const isWebGLError = errorMessage.toLowerCase().includes('webgl');
 
       if (isWebGLError) {
-        const browserHelp = getBrowserSpecificWebGLHelp();
+        const browserHelp = getBrowserSpecificWebGLHelp(navigator.userAgent);
         loading.innerHTML = `
           <p style="color: #ff4444;">WebGL is not available</p>
           <p style="font-size: 13px; margin-top: 15px; color: #ccc;">
@@ -2049,8 +1851,8 @@ async function main() {
       const target = e.target as HTMLSelectElement;
 
       // Clear filters when switching repos (fresh start for new codebase)
-      if (currentVisualizer) {
-        currentVisualizer.clearFilter();
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.clearFilter();
       }
 
       await loadRepository(target.value);
@@ -2062,8 +1864,8 @@ async function main() {
   modeRadios.forEach(radio => {
     radio.addEventListener('change', async () => {
       // Reload current repository with new mode
-      if (currentRepoBaseName) {
-        await loadRepository(currentRepoBaseName);
+      if (appState.repo.currentRepoBaseName) {
+        await loadRepository(appState.repo.currentRepoBaseName);
       }
     });
   });
@@ -2081,8 +1883,8 @@ async function main() {
       const newMode = target.value;
       localStorage.setItem('layoutMode', newMode);
 
-      if (currentVisualizer) {
-        currentVisualizer.setLayoutStrategy(createLayoutStrategy(newMode));
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.setLayoutStrategy(createLayoutStrategy(newMode));
       }
     });
   }
@@ -2103,26 +1905,26 @@ async function main() {
       localStorage.setItem('colorMode', newMode);
 
       // Clear filters when switching color modes (categories are incompatible)
-      if (currentVisualizer) {
-        currentVisualizer.clearFilter();
-        currentVisualizer.setColorMode(newMode);
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.clearFilter();
+        appState.visualizer.currentVisualizer.setColorMode(newMode);
       }
 
       // Update legend for new color mode (checkboxes will be all checked)
-      if (newMode === 'fileType' && currentSnapshot) {
-        populateLegend(currentSnapshot);
+      if (newMode === 'fileType' && appState.visualizer.currentSnapshot) {
+        populateLegend(appState.visualizer.currentSnapshot);
       } else {
         updateLegendForColorMode(newMode);
       }
 
       // Update stats panel to reflect cleared filters
-      if (currentSnapshot) {
-        updateStatsDisplay(currentSnapshot);
+      if (appState.visualizer.currentSnapshot) {
+        updateStatsDisplay(appState.visualizer.currentSnapshot);
       }
     });
   }
 
-  // Set up label toggle (after first repo loads so currentVisualizer exists)
+  // Set up label toggle (after first repo loads so appState.visualizer.currentVisualizer exists)
   const labelToggle = document.getElementById('label-toggle') as HTMLInputElement;
   if (labelToggle) {
     // Load saved preference from localStorage, default to 'hover' (unchecked)
@@ -2137,8 +1939,8 @@ async function main() {
       const newMode = labelToggle.checked ? 'always' : 'hover';
       localStorage.setItem('labelMode', newMode);
 
-      if (currentVisualizer) {
-        currentVisualizer.setLabelMode(newMode);
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.setLabelMode(newMode);
       }
     });
   }
@@ -2158,8 +1960,8 @@ async function main() {
       const newMode = viewModeToggle.checked ? 'overview' : 'navigate';
       localStorage.setItem('viewMode', newMode);
 
-      if (currentVisualizer) {
-        currentVisualizer.setViewMode(newMode);
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.setViewMode(newMode);
       }
 
       console.log('View mode:', newMode);
@@ -2171,23 +1973,23 @@ async function main() {
   if (highlightCommitToggle) {
     // Load saved preference from localStorage, default to true if not set
     const savedHighlightCommit = localStorage.getItem('highlightCommit');
-    highlightCommitEnabled = savedHighlightCommit !== null ? savedHighlightCommit === 'true' : true;
+    appState.selection.highlightCommitEnabled = savedHighlightCommit !== null ? savedHighlightCommit === 'true' : true;
 
     // Set checkbox to match saved mode
-    highlightCommitToggle.checked = highlightCommitEnabled;
+    highlightCommitToggle.checked = appState.selection.highlightCommitEnabled;
 
     // Handle toggle clicks
     highlightCommitToggle.addEventListener('change', () => {
-      highlightCommitEnabled = highlightCommitToggle.checked;
-      localStorage.setItem('highlightCommit', highlightCommitEnabled.toString());
+      appState.selection.highlightCommitEnabled = highlightCommitToggle.checked;
+      localStorage.setItem('highlightCommit', appState.selection.highlightCommitEnabled.toString());
 
       // Clear any existing commit highlighting when toggled off
-      if (!highlightCommitEnabled && currentVisualizer) {
-        currentVisualizer.clearHighlight();
-        currentHighlightedCommit = null;
+      if (!appState.selection.highlightCommitEnabled && appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.clearHighlight();
+        appState.selection.currentHighlightedCommit = null;
       }
 
-      console.log('Highlight commit mode:', highlightCommitEnabled ? 'enabled' : 'disabled');
+      console.log('Highlight commit mode:', appState.selection.highlightCommitEnabled ? 'enabled' : 'disabled');
     });
   }
 
@@ -2211,8 +2013,8 @@ async function main() {
     }
 
     // Apply initial theme to current visualizer if it exists
-    if (currentVisualizer) {
-      currentVisualizer.setTheme(savedTheme as 'light' | 'dark');
+    if (appState.visualizer.currentVisualizer) {
+      appState.visualizer.currentVisualizer.setTheme(savedTheme as 'light' | 'dark');
     }
 
     themeToggleContainer.addEventListener('click', () => {
@@ -2232,8 +2034,8 @@ async function main() {
       }
 
       // Update 3D scene colors
-      if (currentVisualizer) {
-        currentVisualizer.setTheme(newTheme as 'light' | 'dark');
+      if (appState.visualizer.currentVisualizer) {
+        appState.visualizer.currentVisualizer.setTheme(newTheme as 'light' | 'dark');
       }
     });
   }
@@ -2284,7 +2086,11 @@ async function main() {
   };
 
   setupSectionCollapse('visualization-section');
+  setupSectionCollapse('analyze-section');
   setupSectionCollapse('display-options-section');
+
+  // Set up Analyze Repository controls
+  setupAnalyzeControls();
 
   // Set up filter control buttons
   const filterTopBtn = document.getElementById('filter-top-btn');
@@ -2349,20 +2155,6 @@ function showFilterControls() {
 }
 
 /**
- * Hide filter controls (for modes that don't support filtering or in timeline mode)
- */
-function hideFilterControls() {
-  const filterControls = document.getElementById('filter-controls');
-  const filterStatus = document.getElementById('filter-status');
-  if (filterControls) {
-    filterControls.style.display = 'none';
-  }
-  if (filterStatus) {
-    filterStatus.textContent = '';
-  }
-}
-
-/**
  * Disable filtering (when entering timeline mode)
  * Disables checkboxes and shows explanatory message
  */
@@ -2388,8 +2180,8 @@ function disableFiltering() {
   }
 
   // Clear any active filters
-  if (currentVisualizer) {
-    currentVisualizer.clearFilter();
+  if (appState.visualizer.currentVisualizer) {
+    appState.visualizer.currentVisualizer.clearFilter();
   }
 }
 
@@ -2425,16 +2217,16 @@ function enableFiltering() {
  */
 function updateFilterStatus() {
   const filterStatus = document.getElementById('filter-status');
-  if (!filterStatus || !currentVisualizer) return;
+  if (!filterStatus || !appState.visualizer.currentVisualizer) return;
 
   // Get checkbox counts
   const checkboxes = document.querySelectorAll('.legend-checkbox');
   const totalCategories = checkboxes.length;
-  const activeCategories = currentVisualizer.getActiveFilterCategories();
+  const activeCategories = appState.visualizer.currentVisualizer.getActiveFilterCategories();
   const activeCount = activeCategories.length;
 
   // If no filters OR all categories selected, no effective filtering happening
-  if (!currentVisualizer.hasActiveFilters() || activeCount === totalCategories) {
+  if (!appState.visualizer.currentVisualizer.hasActiveFilters() || activeCount === totalCategories) {
     filterStatus.textContent = '';
   } else {
     // Show selected/total for clarity
@@ -2505,7 +2297,7 @@ function updateFilterControlStates() {
  * Apply current legend checkbox state to visualizer
  */
 function applyLegendFilters() {
-  if (!currentVisualizer || !currentSnapshot) return;
+  if (!appState.visualizer.currentVisualizer || !appState.visualizer.currentSnapshot) return;
 
   // Get all checked checkboxes
   const checkboxes = document.querySelectorAll('.legend-checkbox') as NodeListOf<HTMLInputElement>;
@@ -2522,9 +2314,9 @@ function applyLegendFilters() {
 
   // Apply filter (empty array = show all)
   if (checkedCategories.length === 0) {
-    currentVisualizer.clearFilter();
+    appState.visualizer.currentVisualizer.clearFilter();
   } else {
-    currentVisualizer.setFilter(checkedCategories);
+    appState.visualizer.currentVisualizer.setFilter(checkedCategories);
   }
 
   // Update visual state
@@ -2542,7 +2334,7 @@ function applyLegendFilters() {
   updateFilterStatus();
 
   // Update stats panel to reflect filtered counts
-  updateStatsDisplay(currentSnapshot);
+  updateStatsDisplay(appState.visualizer.currentSnapshot);
 
   // Update button states
   updateFilterControlStates();
@@ -2569,7 +2361,7 @@ function updateLegendForColorMode(mode: ColorMode) {
 
   const items = getLegendItems(mode);
 
-  if (items.length > 0 && mode === 'lastModified' && currentSnapshot) {
+  if (items.length > 0 && mode === 'lastModified' && appState.visualizer.currentSnapshot) {
     // Calculate file counts for each interval
     const intervalCounts = new Map<string, number>();
     const collectIntervalCounts = (node: TreeNode) => {
@@ -2582,9 +2374,9 @@ function updateLegendForColorMode(mode: ColorMode) {
         }
       }
     };
-    collectIntervalCounts(currentSnapshot.tree);
+    collectIntervalCounts(appState.visualizer.currentSnapshot.tree);
 
-    const totalFiles = currentSnapshot.stats.totalFiles;
+    const totalFiles = appState.visualizer.currentSnapshot.stats.totalFiles;
 
     // Show intervals with counts and percentages (with checkboxes)
     for (const item of items) {
@@ -2607,7 +2399,7 @@ function updateLegendForColorMode(mode: ColorMode) {
     }
     showFilterControls();
     updateFilterControlStates();
-  } else if (mode === 'author' && currentSnapshot) {
+  } else if (mode === 'author' && appState.visualizer.currentSnapshot) {
     // For author mode, collect authors with file counts
     const authorCounts = new Map<string, number>();
     const collectAuthors = (node: TreeNode) => {
@@ -2619,7 +2411,7 @@ function updateLegendForColorMode(mode: ColorMode) {
         }
       }
     };
-    collectAuthors(currentSnapshot.tree);
+    collectAuthors(appState.visualizer.currentSnapshot.tree);
 
     // Sort by file count (descending), then show top 20
     const sortedAuthors = Array.from(authorCounts.entries())
@@ -2631,7 +2423,7 @@ function updateLegendForColorMode(mode: ColorMode) {
 
     const displayAuthors = sortedAuthors.slice(0, 20);
 
-    const totalFiles = currentSnapshot.stats.totalFiles;
+    const totalFiles = appState.visualizer.currentSnapshot.stats.totalFiles;
 
     for (const [author, count] of displayAuthors) {
       const percentage = ((count / totalFiles) * 100).toFixed(1);
@@ -2662,13 +2454,13 @@ function updateLegendForColorMode(mode: ColorMode) {
  * Timeline playback functions (V1 format - deprecated)
  */
 function updateTimelineV1UI() {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
-  const commits = currentTimelineData.timeline.baseSampling.commits;
-  const commit = commits[timelineIndex];
+  const commits = appState.visualizer.currentTimelineData.timeline.baseSampling.commits;
+  const commit = commits[appState.timelineV1.index];
 
   // Update progress bar
-  const progress = ((timelineIndex + 1) / commits.length) * 100;
+  const progress = ((appState.timelineV1.index + 1) / commits.length) * 100;
   const progressBar = document.getElementById('timeline-progress');
   if (progressBar) {
     progressBar.style.width = `${progress}%`;
@@ -2678,27 +2470,27 @@ function updateTimelineV1UI() {
   const commitIndexEl = document.getElementById('timeline-commit-index');
   const commitTotalEl = document.getElementById('timeline-commit-total');
 
-  if (commitIndexEl) commitIndexEl.textContent = (timelineIndex + 1).toString();
+  if (commitIndexEl) commitIndexEl.textContent = (appState.timelineV1.index + 1).toString();
   if (commitTotalEl) commitTotalEl.textContent = commits.length.toString();
 
   // Update commit info in timeline (below the scrubber)
   const commitInfo = document.getElementById('commit-info');
-  if (commitInfo && currentSnapshot) {
+  if (commitInfo && appState.visualizer.currentSnapshot) {
     const date = new Date(commit.date).toLocaleDateString();
-    commitInfo.textContent = `${commit.hash.substring(0, 7)} • ${date} • ${currentSnapshot.stats.totalFiles} files • ${currentSnapshot.stats.totalLoc.toLocaleString()} LOC`;
+    commitInfo.textContent = `${commit.hash.substring(0, 7)} • ${date} • ${appState.visualizer.currentSnapshot.stats.totalFiles} files • ${appState.visualizer.currentSnapshot.stats.totalLoc.toLocaleString()} LOC`;
   }
 
-  console.log(`Timeline: commit ${timelineIndex + 1}/${commits.length} - ${commit.hash.substring(0, 7)}`);
+  console.log(`Timeline: commit ${appState.timelineV1.index + 1}/${commits.length} - ${commit.hash.substring(0, 7)}`);
 
   // Highlight changed files in this commit
   highlightTimelineCommitFiles(commit);
 }
 
-function highlightTimelineCommitFiles(commit: any, commitIndex?: number) {
-  if (!currentVisualizer) return;
+function highlightTimelineCommitFiles(commit: CommitSnapshot) {
+  if (!appState.visualizer.currentVisualizer) return;
 
   // Timeline (full delta) vs V1 (sampled) have different highlighting semantics
-  const isTimelineV2 = currentDeltaController !== null;
+  const isTimelineV2 = appState.visualizer.currentDeltaController !== null;
 
   // Calculate changes
   const filesAdded = commit.changes.filesAdded.length;
@@ -2716,14 +2508,14 @@ function highlightTimelineCommitFiles(commit: any, commitIndex?: number) {
     const modifiedFiles: FileNode[] = [];
 
     for (const path of commit.changes.filesAdded) {
-      const fileNode = pathToFileIndex.get(path);
+      const fileNode = appState.selection.pathToFileIndex.get(path);
       if (fileNode) {
         addedFiles.push(fileNode);
       }
     }
 
     for (const path of commit.changes.filesModified) {
-      const fileNode = pathToFileIndex.get(path);
+      const fileNode = appState.selection.pathToFileIndex.get(path);
       if (fileNode) {
         modifiedFiles.push(fileNode);
       }
@@ -2736,20 +2528,42 @@ function highlightTimelineCommitFiles(commit: any, commitIndex?: number) {
     const changedFiles = [...addedFiles, ...modifiedFiles];
     const deletedPaths = commit.changes.filesDeleted || [];
 
+    // Build minimal FileNode objects for deleted files so the edge-coloring code
+    // in TreeVisualizer can populate deletedFileNodes and match ghost mesh paths.
+    // Ghost meshes are already rendered by renderDeletedFiles() and added to fileObjects.
+    const deletedFileNodeObjects: FileNode[] = deletedPaths.map(filePath => ({
+      path: filePath,
+      name: filePath.split('/').pop() || filePath,
+      type: 'file' as const,
+      loc: 0,
+      extension: filePath.split('.').pop() || 'no-extension',
+      lastModified: null,
+      lastAuthor: null,
+      lastCommitHash: null,
+      commitCount: null,
+      contributorCount: null,
+      firstCommitDate: null,
+      recentLinesChanged: null,
+      avgLinesPerCommit: null,
+      daysSinceLastModified: null,
+    }));
+
     if (totalChanges === 0) {
       // No changes at all - empty commit
-      currentVisualizer.clearHighlight();
+      appState.visualizer.currentVisualizer.clearHighlight();
       hideTimelineWarning();
     } else if (changedFiles.length === 0 && deletedPaths.length === 0) {
       // Should have found additions/modifications/deletions but didn't - unexpected!
-      currentVisualizer.clearHighlight();
+      appState.visualizer.currentVisualizer.clearHighlight();
       showTimelineWarning(`⚠️ Cannot highlight ${totalChanges} change(s)`);
       console.warn(`Timeline: Failed to find ${totalChanges} file changes`);
     } else if (changedFiles.length < nonGhostChanges) {
       // Found some but not all additions/modifications - partial highlighting
       const addedPaths = addedFiles.map(f => f.path);
       const modifiedPaths = modifiedFiles.map(f => f.path);
-      currentVisualizer.highlightFilesByType(addedPaths, modifiedPaths, deletedPaths, []);
+      appState.visualizer.currentVisualizer.highlightFilesByType(
+        addedPaths, modifiedPaths, deletedPaths, deletedFileNodeObjects
+      );
 
       // Some additions/modifications are missing (actual problem)
       showTimelineWarning(`⚠️ Highlighting ${changedFiles.length + deletedPaths.length}/${totalChanges} changes`);
@@ -2757,7 +2571,9 @@ function highlightTimelineCommitFiles(commit: any, commitIndex?: number) {
       // Found all additions/modifications - success! (deletions are ghosts)
       const addedPaths = addedFiles.map(f => f.path);
       const modifiedPaths = modifiedFiles.map(f => f.path);
-      currentVisualizer.highlightFilesByType(addedPaths, modifiedPaths, deletedPaths, []);
+      appState.visualizer.currentVisualizer.highlightFilesByType(
+        addedPaths, modifiedPaths, deletedPaths, deletedFileNodeObjects
+      );
       hideTimelineWarning();
     }
 
@@ -2767,7 +2583,7 @@ function highlightTimelineCommitFiles(commit: any, commitIndex?: number) {
     const changedFiles: FileNode[] = [];
 
     for (const path of [...commit.changes.filesAdded, ...commit.changes.filesModified]) {
-      const fileNode = pathToFileIndex.get(path);
+      const fileNode = appState.selection.pathToFileIndex.get(path);
       if (fileNode) {
         changedFiles.push(fileNode);
       }
@@ -2775,18 +2591,18 @@ function highlightTimelineCommitFiles(commit: any, commitIndex?: number) {
 
     // V1 warnings help user understand which historical files are missing from HEAD
     if (changedFiles.length === 0) {
-      currentVisualizer.clearHighlight();
+      appState.visualizer.currentVisualizer.clearHighlight();
       showTimelineWarning(`⚠️ Cannot highlight changes - ${totalChanges} file${totalChanges !== 1 ? 's' : ''} not in current view`);
       console.log(`Timeline V1: 0 of ${totalChanges} files found in HEAD`);
     } else if (changedFiles.length < totalChanges) {
       const filePaths = changedFiles.map(f => f.path);
-      currentVisualizer.highlightFiles(filePaths);
+      appState.visualizer.currentVisualizer.highlightFiles(filePaths);
       const missing = totalChanges - changedFiles.length;
       showTimelineWarning(`⚠️ Highlighting ${changedFiles.length} of ${totalChanges} files (${missing} not in current view)`);
       console.log(`Timeline V1: Partial ${changedFiles.length}/${totalChanges} files in HEAD`);
     } else {
       const filePaths = changedFiles.map(f => f.path);
-      currentVisualizer.highlightFiles(filePaths);
+      appState.visualizer.currentVisualizer.highlightFiles(filePaths);
       hideTimelineWarning();
       console.log(`Timeline V1: Highlighted all ${changedFiles.length} files`);
     }
@@ -2810,59 +2626,59 @@ function hideTimelineWarning() {
 }
 
 function stepForward() {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
-  const commits = currentTimelineData.timeline.baseSampling.commits;
-  if (timelineIndex < commits.length - 1) {
-    timelineIndex++;
+  const commits = appState.visualizer.currentTimelineData.timeline.baseSampling.commits;
+  if (appState.timelineV1.index < commits.length - 1) {
+    appState.timelineV1.index++;
     updateTimelineV1UI();
   }
 }
 
 function stepBackward() {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
-  if (timelineIndex > 0) {
-    timelineIndex--;
+  if (appState.timelineV1.index > 0) {
+    appState.timelineV1.index--;
     updateTimelineV1UI();
   }
 }
 
 function goToStart() {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
-  timelineIndex = 0;
+  appState.timelineV1.index = 0;
   updateTimelineV1UI();
 }
 
 function togglePlayPause() {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
   const playPauseBtn = document.getElementById('play-pause-btn');
 
-  if (timelinePlaying) {
+  if (appState.timelineV1.playing) {
     // Pause
-    timelinePlaying = false;
-    if (timelineIntervalId !== null) {
-      clearInterval(timelineIntervalId);
-      timelineIntervalId = null;
+    appState.timelineV1.playing = false;
+    if (appState.timelineV1.intervalId !== null) {
+      clearInterval(appState.timelineV1.intervalId);
+      appState.timelineV1.intervalId = null;
     }
     if (playPauseBtn) {
       playPauseBtn.textContent = '▶ Play';
     }
   } else {
     // Play
-    timelinePlaying = true;
+    appState.timelineV1.playing = true;
     if (playPauseBtn) {
       playPauseBtn.textContent = '⏸ Pause';
     }
 
     const baseInterval = 2000; // 2 seconds per commit at 1x speed
-    const interval = baseInterval / timelineSpeed;
+    const interval = baseInterval / appState.timelineV1.speed;
 
-    timelineIntervalId = window.setInterval(() => {
-      const commits = currentTimelineData!.timeline.baseSampling.commits;
-      if (timelineIndex < commits.length - 1) {
+    appState.timelineV1.intervalId = window.setInterval(() => {
+      const commits = appState.visualizer.currentTimelineData!.timeline.baseSampling.commits;
+      if (appState.timelineV1.index < commits.length - 1) {
         stepForward();
       } else {
         // Reached end, stop playing
@@ -2873,21 +2689,21 @@ function togglePlayPause() {
 }
 
 function seekTimeline(percentage: number) {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
-  const commits = currentTimelineData.timeline.baseSampling.commits;
+  const commits = appState.visualizer.currentTimelineData.timeline.baseSampling.commits;
   const newIndex = Math.floor((percentage / 100) * commits.length);
-  timelineIndex = Math.max(0, Math.min(newIndex, commits.length - 1));
+  appState.timelineV1.index = Math.max(0, Math.min(newIndex, commits.length - 1));
   updateTimelineV1UI();
 }
 
 function setupTimelineV1Controls() {
-  if (!currentTimelineData) return;
+  if (!appState.visualizer.currentTimelineData) return;
 
   // Initialize UI
   const commitTotalEl = document.getElementById('timeline-commit-total');
   if (commitTotalEl) {
-    commitTotalEl.textContent = currentTimelineData.timeline.baseSampling.commits.length.toString();
+    commitTotalEl.textContent = appState.visualizer.currentTimelineData.timeline.baseSampling.commits.length.toString();
   }
 
   // Play/Pause button
@@ -2917,10 +2733,10 @@ function setupTimelineV1Controls() {
   if (speedSelector) {
     speedSelector.addEventListener('change', (e) => {
       const target = e.target as HTMLSelectElement;
-      timelineSpeed = parseFloat(target.value);
+      appState.timelineV1.speed = parseFloat(target.value);
 
       // If currently playing, restart with new speed
-      if (timelinePlaying) {
+      if (appState.timelineV1.playing) {
         togglePlayPause(); // Stop
         togglePlayPause(); // Start with new speed
       }
@@ -2939,8 +2755,138 @@ function setupTimelineV1Controls() {
   }
 
   // Set initial state
-  timelineIndex = 0;
+  appState.timelineV1.index = 0;
   updateTimelineV1UI();
+}
+
+/**
+ * Set up Analyze Repository controls:
+ * - Mode selector shows/hides target commits input
+ * - Start button triggers API call with SSE progress
+ * - On completion, auto-reloads the repo list and selects new repo
+ */
+function setupAnalyzeControls() {
+  const modeSelector = document.getElementById('analyze-mode-selector') as HTMLSelectElement | null;
+  const targetCommitsGroup = document.getElementById('analyze-target-commits-group');
+  const startBtn = document.getElementById('analyze-start-btn') as HTMLButtonElement | null;
+  const repoInput = document.getElementById('analyze-repo-input') as HTMLInputElement | null;
+  const targetCommitsInput = document.getElementById('analyze-target-commits') as HTMLInputElement | null;
+  const progressContainer = document.getElementById('analyze-progress');
+  const progressBar = document.getElementById('analyze-progress-bar');
+  const progressPercent = document.getElementById('analyze-progress-percent');
+  const progressMessage = document.getElementById('analyze-progress-message');
+
+  if (!modeSelector || !startBtn || !repoInput) return;
+
+  // Show/hide target commits based on mode
+  modeSelector.addEventListener('change', () => {
+    if (targetCommitsGroup) {
+      targetCommitsGroup.style.display = modeSelector.value === 'timeline-v1' ? 'flex' : 'none';
+    }
+  });
+
+  let cleanupProgress: (() => void) | null = null;
+
+  startBtn.addEventListener('click', async () => {
+    const validationError = validateProcessInput(repoInput.value, modeSelector.value);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+
+    // Build request
+    const targetCommits = targetCommitsInput ? parseInt(targetCommitsInput.value, 10) : undefined;
+    const request = buildProcessRequest(
+      repoInput.value,
+      modeSelector.value as ProcessMode,
+      targetCommits
+    );
+
+    // Show progress UI
+    if (progressContainer) progressContainer.style.display = 'block';
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressPercent) progressPercent.textContent = '0%';
+    if (progressMessage) progressMessage.textContent = 'Starting analysis...';
+    startBtn.disabled = true;
+    startBtn.textContent = 'Analyzing...';
+
+    // Clean up any previous SSE connection
+    if (cleanupProgress) {
+      cleanupProgress();
+      cleanupProgress = null;
+    }
+
+    try {
+      const response = await startProcessJob(request);
+
+      // Subscribe to progress via SSE
+      cleanupProgress = subscribeToProgress(response.jobId, (event: ProgressEvent) => {
+        if (progressBar && event.percent !== undefined) {
+          progressBar.style.width = `${event.percent}%`;
+        }
+        if (progressPercent && event.percent !== undefined) {
+          progressPercent.textContent = `${Math.round(event.percent)}%`;
+        }
+        if (progressMessage) {
+          progressMessage.textContent = event.message;
+        }
+
+        if (event.type === 'complete') {
+          startBtn.disabled = false;
+          startBtn.textContent = 'Analyze';
+          if (progressBar) progressBar.style.width = '100%';
+          if (progressPercent) progressPercent.textContent = '100%';
+          if (progressMessage) progressMessage.textContent = 'Analysis complete! Loading...';
+
+          // Auto-reload repo list and select the new repo
+          const repoName = extractRepoName(repoInput.value);
+          autoLoadNewRepo(repoName);
+        }
+
+        if (event.type === 'error') {
+          startBtn.disabled = false;
+          startBtn.textContent = 'Analyze';
+          if (progressMessage) progressMessage.textContent = `Error: ${event.message}`;
+          if (progressBar) progressBar.style.background = '#e74c3c';
+        }
+      });
+    } catch (error) {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Analyze';
+      if (progressMessage) {
+        progressMessage.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      }
+    }
+  });
+}
+
+/**
+ * After processing completes, reload the repo dropdown and select the new repo.
+ */
+async function autoLoadNewRepo(repoName: string) {
+  // Re-fetch repo list
+  const repos = await getAvailableRepos();
+  const repoSelector = document.getElementById('repo-selector') as HTMLSelectElement | null;
+  if (!repoSelector) return;
+
+  // Rebuild dropdown using safe DOM methods
+  while (repoSelector.firstChild) {
+    repoSelector.removeChild(repoSelector.firstChild);
+  }
+  for (const repo of repos) {
+    const option = document.createElement('option');
+    option.value = repo;
+    option.textContent = repo;
+    repoSelector.appendChild(option);
+  }
+
+  // Try to select the newly analyzed repo (match by base name)
+  const matchingRepo = repos.find(r => r.toLowerCase().includes(repoName.toLowerCase()));
+  if (matchingRepo) {
+    repoSelector.value = matchingRepo;
+    // Trigger the change event to load the repo
+    repoSelector.dispatchEvent(new Event('change'));
+  }
 }
 
 // Start the application

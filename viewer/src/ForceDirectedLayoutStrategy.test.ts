@@ -1,9 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { ForceDirectedLayoutStrategy } from './ForceDirectedLayoutStrategy';
+import { ForceDirectedLayoutStrategy, ForceDirectedConfig, FileOrbitInfo } from './ForceDirectedLayoutStrategy';
 import { DirectoryNode, FileNode } from './types';
 import { PhysicsNode } from './PhysicsNode';
 import { LayoutNode } from './ILayoutStrategy';
+import { createMockFile } from './lib/test-fixtures';
+
+/** Extended PhysicsNode type used in tests — includes optional territoryRadius from older design */
+type PhysicsNodeWithTerritory = PhysicsNode & { territoryRadius?: number };
+
+/** Structural type for accessing ForceDirectedLayoutStrategy private state in tests */
+interface ForceDirectedInternals {
+  physicsNodes: Map<DirectoryNode, PhysicsNodeWithTerritory>;
+  fileOrbitInfo: FileOrbitInfo[];
+  config: ForceDirectedConfig;
+}
 
 /**
  * Test Suite: Force-Directed Layout Strategy - Gource Two-Radius System
@@ -63,19 +74,19 @@ describe('PhysicsNode - Single Radius (Gource Algorithm)', () => {
   it('should use radius (not territoryRadius) for overlap detection', () => {
     // Create two physics nodes with known radii
     const layoutNode1: LayoutNode = {
-      node: { type: 'directory', name: 'dir1', children: [] } as DirectoryNode,
+      node: { type: 'directory', name: 'dir1', path: '', children: [] } as DirectoryNode,
       position: new THREE.Vector3(0, 0, 0),
       parent: undefined
     };
 
     const layoutNode2: LayoutNode = {
-      node: { type: 'directory', name: 'dir2', children: [] } as DirectoryNode,
+      node: { type: 'directory', name: 'dir2', path: '', children: [] } as DirectoryNode,
       position: new THREE.Vector3(0, 0, 0),
       parent: undefined
     };
 
-    const node1 = new PhysicsNode(layoutNode1, 5.0, null);
-    const node2 = new PhysicsNode(layoutNode2, 3.0, null);
+    const node1 = new PhysicsNode(layoutNode1, 5.0, 0);
+    const node2 = new PhysicsNode(layoutNode2, 3.0, 0);
 
     // Position nodes beyond their radius sum
     node1.position.set(0, 0, 0);
@@ -97,12 +108,12 @@ describe('PhysicsNode - Single Radius (Gource Algorithm)', () => {
    */
   it('should only have radius property, not territoryRadius (Gource has one radius)', () => {
     const layoutNode: LayoutNode = {
-      node: { type: 'directory', name: 'dir1', children: [] } as DirectoryNode,
+      node: { type: 'directory', name: 'dir1', path: '', children: [] } as DirectoryNode,
       position: new THREE.Vector3(0, 0, 0),
       parent: undefined
     };
 
-    const physicsNode = new PhysicsNode(layoutNode, 5.0, null);
+    const physicsNode = new PhysicsNode(layoutNode, 5.0, 0);
 
     // Gource's RDirNode only has dir_radius (one radius for everything)
     expect(physicsNode.radius).toBe(5.0);
@@ -192,9 +203,10 @@ describe('ForceDirectedLayoutStrategy - Connection Line Distances (Realistic Rep
         lastCommitHash: 'abc123',
         commitCount: 5,
         contributorCount: 2,
-        churn: 3,
-        complexity: 1,
-        age: 30
+        firstCommitDate: null,
+        recentLinesChanged: null,
+        avgLinesPerCommit: null,
+        daysSinceLastModified: null,
       }));
     };
 
@@ -331,7 +343,7 @@ describe('ForceDirectedLayoutStrategy - Connection Line Distances (Realistic Rep
     }
 
     // Measure distances between siblings
-    for (const [parent, siblings] of byParent.entries()) {
+    for (const [_parent, siblings] of byParent.entries()) {
       if (siblings.length < 2) continue;
 
       for (let i = 0; i < siblings.length; i++) {
@@ -379,7 +391,7 @@ describe('ForceDirectedLayoutStrategy - Connection Line Distances (Realistic Rep
       { name: 'large', repo: createLargeRepo(), expectedRatio: { min: 2, max: 4 } }
     ];
 
-    for (const { name, repo, expectedRatio } of testCases) {
+    for (const { name, repo } of testCases) {
       const layoutNodes = strategy.layoutTree(repo, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
       // Run physics simulation to let directories spread out
@@ -448,9 +460,10 @@ describe('ForceDirectedLayoutStrategy - Connection Line Distances (Realistic Rep
       const parentChildPairs: Array<{ parent: string; child: string; distance: number; ratio: number; parentParentRadius: number; childRadius: number }> = [];
 
       for (const child of directories) {
-        if (!child.parent) continue; // Skip root
+        const childParent = child.parent;
+        if (!childParent) continue; // Skip root
 
-        const parent = directories.find(d => d.node === child.parent.node);
+        const parent = directories.find(d => d.node === childParent.node);
         if (!parent) continue;
 
         const dist = Math.sqrt(
@@ -545,14 +558,20 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     // Create directory with 10 files
     // Files will orbit in rings around the directory center
     const files: FileNode[] = Array(10).fill(null).map((_, i) => ({
-      type: 'file',
+      type: 'file' as const,
       name: `file${i}.ts`,
       path: `src/file${i}.ts`,
       extension: 'ts',
       loc: 100,
-      commits: 1,
       lastModified: new Date().toISOString(),
-      contributors: 1
+      lastAuthor: null,
+      lastCommitHash: null,
+      commitCount: null,
+      contributorCount: null,
+      firstCommitDate: null,
+      recentLinesChanged: null,
+      avgLinesPerCommit: null,
+      daysSinceLastModified: null,
     }));
 
     const dir: DirectoryNode = {
@@ -576,7 +595,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     expect(dirLayoutNode).toBeDefined();
 
     // Access physics node to check territory radius
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const physicsNode = physicsNodes.get(dir);
     expect(physicsNode).toBeDefined();
 
@@ -609,14 +628,20 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     // Helper to create directory with files
     const createDirWithFiles = (name: string, fileCount: number): DirectoryNode => {
       const files: FileNode[] = Array(fileCount).fill(null).map((_, i) => ({
-        type: 'file',
+        type: 'file' as const,
         name: `${name}_file${i}.ts`,
         path: `${name}/${name}_file${i}.ts`,
         extension: 'ts',
         loc: 100,
-        commits: 1,
         lastModified: new Date().toISOString(),
-        contributors: 1
+        lastAuthor: null,
+        lastCommitHash: null,
+        commitCount: null,
+        contributorCount: null,
+        firstCommitDate: null,
+        recentLinesChanged: null,
+        avgLinesPerCommit: null,
+        daysSinceLastModified: null,
       }));
 
       return {
@@ -642,7 +667,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     strategy.layoutTree(root, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
     // Access physics nodes
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const pNode1 = physicsNodes.get(dir1);
     const pNode2 = physicsNodes.get(dir2);
 
@@ -704,25 +729,37 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
 
     // Create nested structure: parent has 2 subdirs with 25 files each
     const subdir1Files: FileNode[] = Array(25).fill(null).map((_, i) => ({
-      type: 'file',
+      type: 'file' as const,
       name: `file${i}.ts`,
       path: `parent/subdir1/file${i}.ts`,
       extension: 'ts',
       loc: 100,
-      commits: 1,
       lastModified: new Date().toISOString(),
-      contributors: 1
+      lastAuthor: null,
+      lastCommitHash: null,
+      commitCount: null,
+      contributorCount: null,
+      firstCommitDate: null,
+      recentLinesChanged: null,
+      avgLinesPerCommit: null,
+      daysSinceLastModified: null,
     }));
 
     const subdir2Files: FileNode[] = Array(25).fill(null).map((_, i) => ({
-      type: 'file',
+      type: 'file' as const,
       name: `file${i}.ts`,
       path: `parent/subdir2/file${i}.ts`,
       extension: 'ts',
       loc: 100,
-      commits: 1,
       lastModified: new Date().toISOString(),
-      contributors: 1
+      lastAuthor: null,
+      lastCommitHash: null,
+      commitCount: null,
+      contributorCount: null,
+      firstCommitDate: null,
+      recentLinesChanged: null,
+      avgLinesPerCommit: null,
+      daysSinceLastModified: null,
     }));
 
     const subdir1: DirectoryNode = {
@@ -748,7 +785,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
 
     strategy.layoutTree(parent, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const parentNode = physicsNodes.get(parent);
     const subdir1Node = physicsNodes.get(subdir1);
     const subdir2Node = physicsNodes.get(subdir2);
@@ -781,14 +818,20 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     // Helper to create directory with files
     const createDirWithFiles = (name: string, fileCount: number): DirectoryNode => {
       const files: FileNode[] = Array(fileCount).fill(null).map((_, i) => ({
-        type: 'file',
+        type: 'file' as const,
         name: `${name}_file${i}.ts`,
         path: `root/${name}/${name}_file${i}.ts`,
         extension: 'ts',
         loc: 100,
-        commits: 1,
         lastModified: new Date().toISOString(),
-        contributors: 1
+        lastAuthor: null,
+        lastCommitHash: null,
+        commitCount: null,
+        contributorCount: null,
+        firstCommitDate: null,
+        recentLinesChanged: null,
+        avgLinesPerCommit: null,
+        daysSinceLastModified: null,
       }));
 
       return {
@@ -816,7 +859,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     strategy.layoutTree(root, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
     // Access physics nodes
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const siblingPhysicsNodes = siblings.map(s => physicsNodes.get(s));
 
     // Verify all nodes exist
@@ -873,14 +916,20 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     // Helper to create directory with files
     const createDirWithFiles = (name: string, fileCount: number): DirectoryNode => {
       const files: FileNode[] = Array(fileCount).fill(null).map((_, i) => ({
-        type: 'file',
+        type: 'file' as const,
         name: `${name}_file${i}.ts`,
         path: `root/${name}/${name}_file${i}.ts`,
         extension: 'ts',
         loc: 100,
-        commits: 1,
         lastModified: new Date().toISOString(),
-        contributors: 1
+        lastAuthor: null,
+        lastCommitHash: null,
+        commitCount: null,
+        contributorCount: null,
+        firstCommitDate: null,
+        recentLinesChanged: null,
+        avgLinesPerCommit: null,
+        daysSinceLastModified: null,
       }));
 
       return {
@@ -908,7 +957,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     strategy.layoutTree(root, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
     // Access physics nodes
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const siblingPhysicsNodes = siblings.map(s => physicsNodes.get(s));
 
     // Run physics simulation for realistic duration (3 seconds at 60 FPS)
@@ -984,7 +1033,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
 
     strategy.layoutTree(root, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const childNode = physicsNodes.get(child);
 
     const dt = 1.0 / 60.0;
@@ -1031,14 +1080,20 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
 
     // Create directory with 50 files (enough to span multiple rings)
     const files: FileNode[] = Array(50).fill(null).map((_, i) => ({
-      type: 'file',
+      type: 'file' as const,
       name: `file${i}.ts`,
       path: `dir/file${i}.ts`,
       extension: 'ts',
       loc: 100,
-      commits: 1,
       lastModified: new Date().toISOString(),
-      contributors: 1
+      lastAuthor: null,
+      lastCommitHash: null,
+      commitCount: null,
+      contributorCount: null,
+      firstCommitDate: null,
+      recentLinesChanged: null,
+      avgLinesPerCommit: null,
+      daysSinceLastModified: null,
     }));
 
     const dir: DirectoryNode = {
@@ -1058,7 +1113,7 @@ describe('ForceDirectedLayoutStrategy - Territory Management', () => {
     strategy.layoutTree(root, new THREE.Vector3(0, 0, 0), 0, 0, Math.PI * 2);
 
     // Get file positions
-    const fileOrbitInfo = (strategy as any).fileOrbitInfo;
+    const fileOrbitInfo = (strategy as unknown as ForceDirectedInternals).fileOrbitInfo;
 
     // Group files by ring (distance from directory center)
     const ringTolerance = 0.01;
@@ -1154,41 +1209,29 @@ describe('ForceDirectedLayoutStrategy - Subdirectory Spacing', () => {
       name: 'root',
       path: 'root',
       children: [
-        {
-          type: 'file',
+        createMockFile({
           name: 'root-file.ts',
           path: 'root/root-file.ts',
-          extension: 'ts',
-          loc: 100,
-          commits: 5,
           lastModified: '2024-01-01',
-          contributors: 2,
           lastAuthor: 'dev',
           lastCommitHash: 'abc123',
           commitCount: 5,
           contributorCount: 2,
-          churn: 5
-        },
+        }),
         {
           type: 'directory',
           name: 'subdir1',
           path: 'root/subdir1',
           children: [
-            {
-              type: 'file',
+            createMockFile({
               name: 'file1.ts',
               path: 'root/subdir1/file1.ts',
-              extension: 'ts',
-              loc: 100,
-              commits: 5,
               lastModified: '2024-01-01',
-              contributors: 2,
               lastAuthor: 'dev',
               lastCommitHash: 'abc123',
               commitCount: 5,
               contributorCount: 2,
-              churn: 5
-            }
+            }),
           ]
         }
       ]
@@ -1204,7 +1247,7 @@ describe('ForceDirectedLayoutStrategy - Subdirectory Spacing', () => {
     );
 
     // Access physics nodes (where spiral positioning actually happens)
-    const physicsNodes = (strategy as any).physicsNodes;
+    const physicsNodes = (strategy as unknown as ForceDirectedInternals).physicsNodes;
     const rootPhysics = physicsNodes.get(root)!;
     const childDir = root.children.find(c => c.name === 'subdir1') as DirectoryNode;
     const childPhysics = physicsNodes.get(childDir)!;
@@ -1230,7 +1273,7 @@ describe('ForceDirectedLayoutStrategy - Subdirectory Spacing', () => {
       (childPhysics.position.z - rootPhysics.position.z) ** 2
     );
 
-    const config = (strategy as any).config;
+    const config = (strategy as unknown as ForceDirectedInternals).config;
     console.log('Config gravity:', config.gravity);
     console.log('Final distance (after physics):', finalDistance);
     console.log('Root collision radius:', rootPhysics.radius);
@@ -1250,14 +1293,20 @@ describe('ForceDirectedLayoutStrategy - Subdirectory Spacing', () => {
 
 function createDirWithFiles(name: string, fileCount: number): DirectoryNode {
   const files: FileNode[] = Array(fileCount).fill(null).map((_, i) => ({
-    type: 'file',
+    type: 'file' as const,
     name: `file${i}.ts`,
     path: `${name}/file${i}.ts`,
     extension: 'ts',
     loc: 100,
-    commits: 1,
     lastModified: new Date().toISOString(),
-    contributors: 1
+    lastAuthor: null,
+    lastCommitHash: null,
+    commitCount: null,
+    contributorCount: null,
+    firstCommitDate: null,
+    recentLinesChanged: null,
+    avgLinesPerCommit: null,
+    daysSinceLastModified: null,
   }));
 
   return {
@@ -1278,7 +1327,7 @@ function createRoot(children: DirectoryNode[]): DirectoryNode {
 }
 
 function extractFileRings(strategy: ForceDirectedLayoutStrategy): Map<number, Array<{ x: number; y: number }>> {
-  const fileOrbitInfo = (strategy as any).fileOrbitInfo;
+  const fileOrbitInfo = (strategy as unknown as ForceDirectedInternals).fileOrbitInfo;
   const ringTolerance = 0.01;
   const rings = new Map<number, Array<{ x: number; y: number }>>();
 

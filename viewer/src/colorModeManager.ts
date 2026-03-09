@@ -121,7 +121,6 @@ export function calculateLastModifiedIntervals(dates: string[]): void {
   const p80 = Math.floor(count * 0.8) - 1;
   const p90 = Math.floor(count * 0.9) - 1;
   const p95 = Math.floor(count * 0.95) - 1;
-  const p100 = count - 1;
 
   // Get the dates at each percentile
   const oldestDate = sortedDates[0];

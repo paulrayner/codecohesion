@@ -1,16 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { DataLoader } from './data-loader';
 import { QueryService } from './query-service';
+import { ProcessService } from './process-service';
 import {
   createRepoNotFoundError,
   createInvalidParameterError,
   createMissingParameterError
 } from './error-helper';
 
+const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling'] as const;
+type ProcessingMode = typeof VALID_PROCESSING_MODES[number];
+
 export function createRoutes(): Router {
   const router = Router();
   const dataLoader = new DataLoader();
   const queryService = new QueryService(dataLoader);
+  const processService = new ProcessService();
 
   /**
    * GET /api/repos
@@ -282,6 +287,113 @@ export function createRoutes(): Router {
       const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
       res.status(404).json(errorResponse);
     }
+  });
+
+  /**
+   * POST /api/process
+   * Start a processing job for a repository
+   */
+  router.post('/process', async (req: Request, res: Response) => {
+    try {
+      const { repoPath, repoUrl, mode, targetCommits } = req.body as {
+        repoPath?: string;
+        repoUrl?: string;
+        mode?: string;
+        targetCommits?: number;
+      };
+
+      // Either repoPath or repoUrl is required
+      if (!repoPath && !repoUrl) {
+        const error = createMissingParameterError(
+          'repoPath or repoUrl',
+          'string',
+          'Local filesystem path (repoPath) or remote URL (repoUrl) of the repository to process',
+          'https://codecohesion-api.railway.app/api/process'
+        );
+        return res.status(400).json(error);
+      }
+
+      // mode is required and must be a valid value
+      if (!mode) {
+        const error = createMissingParameterError(
+          'mode',
+          'string',
+          `Processing mode: one of ${VALID_PROCESSING_MODES.join(', ')}`,
+          'https://codecohesion-api.railway.app/api/process'
+        );
+        return res.status(400).json(error);
+      }
+
+      if (!VALID_PROCESSING_MODES.includes(mode as ProcessingMode)) {
+        const error = createInvalidParameterError(
+          'mode',
+          mode,
+          `must be one of: ${VALID_PROCESSING_MODES.join(', ')}`,
+          'https://codecohesion-api.railway.app/api/process'
+        );
+        return res.status(400).json(error);
+      }
+
+      const jobId = await processService.startJob({
+        repoPath,
+        repoUrl,
+        mode: mode as ProcessingMode,
+        targetCommits
+      });
+
+      return res.status(202).json({
+        jobId,
+        status: 'pending',
+        _links: {
+          progress: { href: `/api/process/${jobId}/progress` }
+        }
+      });
+    } catch (error) {
+      console.error('Error starting processing job:', error);
+      res.status(500).json({ error: 'Failed to start processing job' });
+    }
+  });
+
+  /**
+   * GET /api/process/:jobId/progress
+   * SSE stream for real-time progress updates on a processing job
+   */
+  router.get('/process/:jobId/progress', (req: Request, res: Response) => {
+    const { jobId } = req.params;
+
+    const emitter = processService.getJobEmitter(jobId);
+    if (!emitter) {
+      return res.status(404).json({
+        error: 'Job not found',
+        code: 'NOT_FOUND',
+        message: `No processing job found with id '${jobId}'`
+      });
+    }
+
+    // Establish SSE connection
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // All events (progress, complete, error) are emitted on the 'progress' channel
+    // by ProcessService. We forward them as SSE messages and close on terminal events.
+    const onProgress = (data: { type?: string }): void => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      // Close connection on terminal events
+      if (data.type === 'complete' || data.type === 'error') {
+        res.end();
+        emitter.off('progress', onProgress);
+      }
+    };
+
+    emitter.on('progress', onProgress);
+
+    // Clean up listener when client disconnects to prevent memory leaks
+    req.on('close', () => {
+      emitter.off('progress', onProgress);
+    });
   });
 
   return router;

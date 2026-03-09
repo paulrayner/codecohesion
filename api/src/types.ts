@@ -1,63 +1,16 @@
 /**
- * Processor Data Types (shared with processor/src/types.ts)
- * These are copied here to avoid cross-directory TypeScript imports
+ * Re-export shared types from the canonical source
  */
-
-export interface FileNode {
-  path: string;
-  name: string;
-  type: 'file';
-  loc: number;
-  extension: string;
-  lastModified: string | null;
-  lastAuthor: string | null;
-  lastCommitHash: string | null;
-  commitCount: number | null;
-  contributorCount: number | null;
-  firstCommitDate: string | null;
-  recentLinesChanged: number | null;
-  avgLinesPerCommit: number | null;
-  daysSinceLastModified: number | null;
-  isGenerated?: boolean;
-}
-
-export interface DirectoryNode {
-  path: string;
-  name: string;
-  type: 'directory';
-  children: TreeNode[];
-}
-
-export type TreeNode = FileNode | DirectoryNode;
-
-export interface RepositorySnapshot {
-  repositoryPath: string;
-  commit: string;
-  timestamp: string;
-  author: string;
-  message: string;
-  tree: DirectoryNode;
-  commitMessages: Record<string, string>;
-  stats: {
-    totalFiles: number;
-    totalLoc: number;
-    filesByExtension: Record<string, number>;
-  };
-}
-
-export interface TimelineData {
-  format: 'timeline-v1';
-  repositoryPath: string;
-  headSnapshot: RepositorySnapshot;
-  timeline: any;
-}
-
-export interface TimelineDataV2 {
-  format: 'timeline-v2';
-  repositoryPath: string;
-  metadata: any;
-  commits: any[];
-}
+export type {
+  FileNode,
+  DirectoryNode,
+  TreeNode,
+  RepositorySnapshot,
+  TimelineData,
+  CommitSnapshot,
+  DrillDownLayer,
+  TimelineDataV2,
+} from '@codecohesion/shared-types';
 
 /**
  * API Response Types for CodeCohesion API
@@ -160,7 +113,7 @@ export interface ErrorResponse {
   error: string;
   code?: string;
   message?: string;
-  details?: any;
+  details?: Record<string, unknown>;
   help?: {
     message?: string;
     actions?: HelpAction[];

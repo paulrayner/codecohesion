@@ -99,7 +99,7 @@ exports[`buildFileDetailsHTML > should render commit message without siblings 1`
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>
@@ -170,7 +170,7 @@ exports[`buildFileDetailsHTML > should render commit siblings without commit mes
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>
@@ -246,7 +246,7 @@ exports[`buildFileDetailsHTML > should render complete file details with all dat
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>
@@ -369,7 +369,7 @@ exports[`buildFileDetailsHTML > should render coupling cluster with no edges 1`]
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>
@@ -437,7 +437,7 @@ exports[`buildFileDetailsHTML > should render file details without GitHub URL 1`
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>
@@ -498,7 +498,7 @@ exports[`buildFileDetailsHTML > should render file details without commit info 1
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>
@@ -559,7 +559,7 @@ exports[`buildFileDetailsHTML > should render file details without coupling data
     </div>
     <div class="info-row">
       <span class="label">File Age</span>
-      <span class="value">2 years (Mature)</span>
+      <span class="value">3 years (Old)</span>
     </div>
     <div class="info-row">
       <span class="label">Recent Activity (90 days)</span>

@@ -1,37 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { calculateDominantColor, getColorBreakdown } from './directory-color-aggregation';
-import { DirectoryNode, FileNode } from '../types';
+import { DirectoryNode } from '../types';
 import { calculateLocIntervals } from '../colorModeManager';
-
-// Helper function to create mock file nodes
-function createMockFile(overrides: Partial<FileNode> = {}): FileNode {
-  return {
-    path: overrides.path || '/test.ts',
-    name: overrides.name || 'test.ts',
-    type: 'file',
-    loc: overrides.loc ?? 100,
-    extension: overrides.extension || 'ts',
-    lastModified: overrides.lastModified || null,
-    lastAuthor: overrides.lastAuthor || null,
-    lastCommitHash: overrides.lastCommitHash || null,
-    commitCount: overrides.commitCount || null,
-    contributorCount: overrides.contributorCount || null,
-    firstCommitDate: overrides.firstCommitDate || null,
-    recentLinesChanged: overrides.recentLinesChanged || null,
-    avgLinesPerCommit: overrides.avgLinesPerCommit || null,
-    daysSinceLastModified: overrides.daysSinceLastModified || null,
-  };
-}
-
-// Helper function to create mock directory nodes
-function createMockDir(name: string, children: (FileNode | DirectoryNode)[] = []): DirectoryNode {
-  return {
-    path: `/${name}`,
-    name,
-    type: 'directory',
-    children,
-  };
-}
+import { createMockFile, createMockDir } from './test-fixtures';
 
 describe('calculateDominantColor with Lines of Code', () => {
   // Set up LOC intervals based on React repository percentiles
@@ -141,7 +112,7 @@ describe('calculateDominantColor with Lines of Code', () => {
     it.each(testTable)(
       '%s should have correct color breakdown and dominant color',
       (
-        folderName,
+        _folderName,
         getFolder,
         expectedBlue,
         expectedGreen,

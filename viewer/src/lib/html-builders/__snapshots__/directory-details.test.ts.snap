@@ -8,7 +8,7 @@ exports[`buildDirectoryDetailsHTML > should handle special characters in path an
     </div>
     <div class="info-row">
       <span class="label">Path</span>
-      <span class="value">/special-chars/foo_bar</span>
+      <span class="value">/foo_bar</span>
     </div>
     <div class="info-row">
       <span class="label">View on GitHub</span>
@@ -49,7 +49,7 @@ exports[`buildDirectoryDetailsHTML > should render complete directory details wi
     </div>
     <div class="info-row">
       <span class="label">Path</span>
-      <span class="value">/src/components</span>
+      <span class="value">/components</span>
     </div>
     <div class="info-row">
       <span class="label">View on GitHub</span>
@@ -128,7 +128,7 @@ exports[`buildDirectoryDetailsHTML > should render directory with large LOC coun
     </div>
     <div class="info-row">
       <span class="label">Path</span>
-      <span class="value">/src/large</span>
+      <span class="value">/large</span>
     </div>
     
     <div class="info-row">

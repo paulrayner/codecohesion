@@ -1,9 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { RepositorySnapshot, TimelineData, TimelineDataV2, RepoListItem, RepoInfo } from './types';
+import { RepositorySnapshot, TimelineData, RepoListItem, RepoInfo } from './types';
+import { LRUCache } from './lru-cache';
 
 export class DataLoader {
   private dataDir: string;
+  private cache = new LRUCache<string, RepositorySnapshot | TimelineData>(20);
 
   constructor(dataDir?: string) {
     // In production (Railway), dist/ is at api/dist/, so data/ is at api/data/
@@ -75,9 +77,14 @@ export class DataLoader {
    * Load and parse JSON file from data directory
    */
   private async loadRepoFile(filename: string): Promise<RepositorySnapshot | TimelineData> {
+    const cached = this.cache.get(filename);
+    if (cached) return cached;
+
     const filePath = path.join(this.dataDir, filename);
     const content = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(content);
+    const data = JSON.parse(content) as RepositorySnapshot | TimelineData;
+    this.cache.set(filename, data);
+    return data;
   }
 
   /**
@@ -98,9 +105,12 @@ export class DataLoader {
   /**
    * Detect format from data structure
    */
-  private detectFormat(data: any): string {
-    if ('format' in data) {
-      return data.format;
+  private detectFormat(data: unknown): string {
+    if (typeof data === 'object' && data !== null && 'format' in data) {
+      const { format } = data as { format: unknown };
+      if (typeof format === 'string') {
+        return format;
+      }
     }
     return 'static';
   }

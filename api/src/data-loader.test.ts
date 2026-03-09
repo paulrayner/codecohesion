@@ -80,7 +80,7 @@ describe('DataLoader', () => {
       expect(data).toHaveProperty('format');
       expect(data).toHaveProperty('commits');
       expect(data).toHaveProperty('metadata');
-      expect((data as any).format).toBe('timeline-v2');
+      expect((data as Record<string, unknown>).format).toBe('timeline-v2');
     });
   });
 

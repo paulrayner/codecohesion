@@ -1,20 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildDirectoryDetailsHTML, DirectoryDetailsData } from './directory-details';
 import { DirectoryNode } from '../../types';
-
-// Helper function to create mock directory nodes
-function createMockDir(overrides: Partial<DirectoryNode> = {}): DirectoryNode {
-  return {
-    path: overrides.path || '/src',
-    name: overrides.name || 'src',
-    type: 'directory',
-    children: overrides.children || [],
-  };
-}
+import { createMockDir } from '../test-fixtures';
 
 describe('buildDirectoryDetailsHTML', () => {
   it('should render complete directory details with all data present', () => {
-    const dir = createMockDir({ path: '/src/components', name: 'components' });
+    const dir = createMockDir('components');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -36,7 +27,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should render directory details without GitHub URL', () => {
-    const dir = createMockDir({ path: '/lib', name: 'lib' });
+    const dir = createMockDir('lib');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -87,7 +78,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should render empty directory details', () => {
-    const dir = createMockDir({ path: '/empty', name: 'empty' });
+    const dir = createMockDir('empty');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -111,7 +102,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should render directory with large LOC count formatted correctly', () => {
-    const dir = createMockDir({ path: '/src/large', name: 'large' });
+    const dir = createMockDir('large');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -134,7 +125,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should render directory with single file and no subdirectories', () => {
-    const dir = createMockDir({ path: '/config', name: 'config' });
+    const dir = createMockDir('config');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -156,7 +147,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should render directory with only subdirectories', () => {
-    const dir = createMockDir({ path: '/modules', name: 'modules' });
+    const dir = createMockDir('modules');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -179,7 +170,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should render directory with unknown dominant type', () => {
-    const dir = createMockDir({ path: '/misc', name: 'misc' });
+    const dir = createMockDir('misc');
     const data: DirectoryDetailsData = {
       dir,
       stats: {
@@ -202,7 +193,7 @@ describe('buildDirectoryDetailsHTML', () => {
   });
 
   it('should handle special characters in path and name', () => {
-    const dir = createMockDir({ path: '/special-chars/foo_bar', name: 'foo_bar' });
+    const dir = createMockDir('foo_bar');
     const data: DirectoryDetailsData = {
       dir,
       stats: {

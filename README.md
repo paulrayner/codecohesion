@@ -176,40 +176,43 @@ Watch your repository evolve commit-by-commit:
 
 ## 🚀 Quick Start
 
-### 1. Analyze a Repository
+### 1. Install
 
 ```bash
-cd processor
-npm install
-npm run dev -- /path/to/your/repository
+npm install        # Installs all packages via npm workspaces
 ```
 
-This generates a JSON file in `processor/output/` with:
-- Repository structure (hierarchical tree)
-- Lines of code per file
-- Git metadata (last modified date, last author, commit hash)
+### 2. Start the App
+
+```bash
+npm run dev        # Starts viewer + API in parallel via Turborepo
+```
+
+Open http://localhost:3000
+
+### 3. Analyze a Repository
+
+Use the **Analyze** panel in the viewer UI:
+1. Enter a local path (`/path/to/your/repo`) or a GitHub URL
+2. Select a processing mode (HEAD snapshot, Timeline V1/V2, or Coupling)
+3. Click **Analyze** — progress streams in real-time via SSE
+4. When complete, the visualization loads automatically
+
+The API runs the processor as a library and writes output directly to the viewer's data directory — no manual file copying needed.
+
+**Alternatively**, you can use the CLI:
+
+```bash
+cd processor && npm run dev -- /path/to/your/repo           # HEAD snapshot
+cd processor && npm run dev -- /path/to/your/repo --timeline    # Timeline V1
+cd processor && npm run dev -- /path/to/your/repo --full-delta  # Timeline V2
+cd processor && npm run coupling -- /path/to/your/repo          # Coupling analysis
+cp processor/output/*.json viewer/public/data/                  # Copy to viewer
+```
 
 **Example repositories tested:**
 - Gource (120 files, 28K LOC)
 - React (6,784 files, 918K LOC)
-
-### 2. Copy Data to Viewer
-
-```bash
-# The output is in processor/output/repo-data.json
-# Copy it to viewer with a descriptive name
-cp processor/output/repo-data.json viewer/public/data/my-repo.json
-```
-
-### 3. Start Viewer
-
-```bash
-cd viewer
-npm install
-npm run dev
-```
-
-Open http://localhost:3000 (or http://localhost:3001 if port 3000 is in use)
 
 ### 4. Explore Your Codebase
 
@@ -357,23 +360,68 @@ Rather than hard-coded time intervals, the Last Modified mode adapts:
 
 ## 🧑‍💻 Development
 
-### Running Locally
+### Running the Full System Locally
 
-**Processor:**
+This is a monorepo managed by npm workspaces and Turborepo. A single install at the root handles all packages.
+
+#### Step 1: Install
+
 ```bash
-cd processor
-npm install
-npm run dev -- /path/to/repo    # Analyze and generate JSON
-npm run build                    # Compile TypeScript
+npm install        # Installs all packages (processor, viewer, api, shared-types, cli)
 ```
 
-**Viewer:**
+#### Step 2: Start All Services
+
 ```bash
-cd viewer
-npm install
-npm run dev        # Start dev server with hot-reload
-npm run build      # Build for production
-npm run preview    # Preview production build
+npm run dev        # Starts viewer + API in parallel via Turborepo
+```
+
+Open http://localhost:3000. Use the **Analyze** panel in the viewer to process repositories — the API runs the processor as a library and writes output directly to the viewer's data directory.
+
+Or start individual services:
+
+```bash
+cd viewer && npm run dev   # Frontend at http://localhost:3000
+cd api && npm run dev      # API at http://localhost:3001
+```
+
+See the [API README](api/README.md) for endpoints and usage.
+
+#### Processor CLI (Alternative)
+
+You can also run the processor directly from the command line:
+
+```bash
+cd processor && npm run dev -- /path/to/your/repo              # Static HEAD snapshot
+cd processor && npm run dev -- /path/to/your/repo --timeline   # Timeline with evolution data
+cd processor && npm run dev -- /path/to/your/repo --full-delta # Full commit-by-commit history (Timeline V2)
+cd processor && npm run coupling -- /path/to/your/repo         # Temporal coupling analysis
+```
+
+Output goes to `processor/output/`. Copy to the viewer with `cp processor/output/*.json viewer/public/data/`.
+
+### Running Tests
+
+```bash
+npm test                           # All packages via Turborepo (recommended)
+
+# Or run per-package:
+cd viewer && npm test              # Vitest, jsdom environment
+cd api && npm test -- --run        # Vitest (default is watch mode)
+cd processor && npm test           # Vitest
+```
+
+### Quality Checks
+
+```bash
+npm run lint                       # All packages via Turborepo
+
+# Or run per-package:
+cd viewer && npm run lint          # ESLint
+cd api && npm run lint
+cd processor && npm run lint
+
+cd viewer && npm run test:coverage # Coverage thresholds on src/lib/
 ```
 
 ### Adding New Color Modes
@@ -448,9 +496,10 @@ cd viewer && rm src/*.js
 - Legend-based multi-select filtering
 
 **Automated Tests:**
-- 105 passing unit tests covering core functionality
+- 354 passing unit tests across all three packages (viewer, api, processor)
+- Architecture fitness tests enforcing file size and dependency invariants
 - Directory color aggregation tests with real React repository data
-- Tree utilities and data loading validation
+- Tree utilities, data loading, and type shape validation
 
 **Known Limitations:**
 - Very large repositories (10K+ files) not yet tested
@@ -488,6 +537,6 @@ MIT
 
 **Repository:** https://github.com/virtualgenius/codecohesion
 
-*Last Updated: 2025-10-24*
-*Status: Coupling Analysis Complete | Slices 1-9 ✅ | 11 Color Modes | 105 Tests Passing*
-*Next: Performance Optimization & Advanced DDD Analysis*
+*Last Updated: 2026-03-07*
+*Status: Coupling Analysis Complete | Slices 1-9 ✅ | 11 Color Modes | 354 Tests Passing*
+*Next: main.ts Extraction & Advanced DDD Analysis*
