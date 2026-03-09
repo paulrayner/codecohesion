@@ -105,6 +105,33 @@ export interface DrillDownLayer {
 }
 
 /**
+ * Summary DTO for a single import edge — safe to embed in API responses.
+ * Omits large internal details; full detail lives in StructureGraph (processor-local).
+ */
+export interface ImportEdgeSummary {
+  from: string;
+  to: string;
+  toRaw: string;
+  isExternal: boolean;
+  /** Named symbols imported; optional for backwards compatibility with consumers that omit it. */
+  symbols?: string[];
+}
+
+/**
+ * Summary DTO for a structure analysis result.
+ * Returned by the API; full StructureGraph is processor-local.
+ */
+export interface StructureSummary {
+  format: 'structure-v1';
+  repositoryPath: string;
+  analyzedAt: string;
+  filesAnalyzed: number;
+  importEdges: number;
+  functionDecls: number;
+  parseErrors: number;
+}
+
+/**
  * Timeline V2 format with full commit history (no sampling)
  * Designed for delta-based tree reconstruction (Phase 1 POC)
  */

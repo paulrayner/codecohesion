@@ -4,3 +4,7 @@ export { FullDeltaAnalyzer } from './full-delta-analyzer';
 export { CouplingAnalyzer } from './coupling-analyzer';
 export { Logger, silentLogger, consoleLogger } from './logger';
 export { FileReader, nodeFileReader } from './file-reader';
+export { StructureAnalyzer } from './structure-analyzer';
+export type { StructureGraph, ImportEdge, FunctionDecl } from './structure-types';
+export { ComplexityAnalyzer } from './complexity-analyzer';
+export type { ComplexityReport, FileComplexity, FunctionComplexity, HotspotEntry } from './complexity-types';

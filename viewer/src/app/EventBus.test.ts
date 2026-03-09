@@ -4,7 +4,7 @@ import { EventBus, AppEvent } from './EventBus';
 // Minimal mock snapshot — tests only care about the shape, not the values.
 const mockSnapshot = {
   tree: { path: '/', name: 'root', type: 'directory', children: [] },
-} as any;
+} as unknown as import('../types').RepositorySnapshot;
 
 describe('EventBus', () => {
   let bus: EventBus;

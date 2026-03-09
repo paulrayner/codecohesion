@@ -10,6 +10,7 @@ import {
   TimelineAnalyzer,
   FullDeltaAnalyzer,
   CouplingAnalyzer,
+  StructureAnalyzer,
   Logger,
 } from 'codecohesion-processor';
 import type { RepositorySnapshot } from './types';
@@ -22,9 +23,9 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_DATA_DIR = path.join(__dirname, '../../viewer/public/data');
 const CLONE_BASE_DIR = path.join(os.tmpdir(), 'codecohesion-clones');
 
-export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'coupling';
+export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'coupling' | 'structure';
 
-const VALID_MODES = new Set<ProcessMode>(['head', 'timeline-v1', 'timeline-v2', 'coupling']);
+const VALID_MODES = new Set<ProcessMode>(['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure']);
 
 export interface ProcessJob {
   id: string;
@@ -134,8 +135,12 @@ async function ensureCloned(url: string, logger: Logger): Promise<string> {
     await fs.access(path.join(cloneDir, '.git'));
     logger.log(`Reusing existing clone at ${cloneDir}`);
     return cloneDir;
-  } catch {
-    // Clone directory does not exist or is not a git repo — proceed with clone.
+  } catch (err) {
+    // Only proceed with a fresh clone when the path does not exist (ENOENT).
+    // Re-throw other errors (e.g. permission denied) so the job fails explicitly.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
   }
 
   await fs.mkdir(cloneDir, { recursive: true });
@@ -167,8 +172,14 @@ async function updateReposJson(dataDir: string, repoName: string): Promise<void>
     } else if (Array.isArray(parsed)) {
       repos = parsed.filter((entry): entry is string => typeof entry === 'string');
     }
-  } catch {
-    // File missing or unparseable — start with an empty list.
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File does not yet exist — start with an empty list.
+    } else {
+      // File exists but could not be read or parsed; log a warning and start fresh
+      // rather than propagating an error that would abort the analysis job.
+      console.warn('updateReposJson: could not read repos.json, starting fresh:', err);
+    }
   }
 
   if (!repos.includes(repoName)) {
@@ -352,6 +363,9 @@ export class ProcessService {
 
       case 'coupling':
         return this.runCouplingAnalysis(localPath, repoName, logger);
+
+      case 'structure':
+        return this.runStructureAnalysis(localPath, repoName, logger);
     }
   }
 
@@ -412,6 +426,16 @@ export class ProcessService {
     const couplingAnalyzer = new CouplingAnalyzer(logger);
     const couplingData = couplingAnalyzer.analyze(timelineData, timelinePath);
     return this.writeOutput(`${repoName}-coupling`, couplingData);
+  }
+
+  private async runStructureAnalysis(
+    localPath: string,
+    repoName: string,
+    logger: Logger
+  ): Promise<string> {
+    const analyzer = new StructureAnalyzer(localPath, logger);
+    const structureData = await analyzer.analyze();
+    return this.writeOutput(`${repoName}-structure`, structureData);
   }
 
   /**

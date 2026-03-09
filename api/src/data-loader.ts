@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { RepositorySnapshot, TimelineData, RepoListItem, RepoInfo } from './types';
 import { LRUCache } from './lru-cache';
+import type { StructureGraph, ImportEdge } from 'codecohesion-processor';
 
 export class DataLoader {
   private dataDir: string;
@@ -38,6 +39,58 @@ export class DataLoader {
     );
 
     return repos.filter((r): r is RepoListItem => r !== null);
+  }
+
+  /**
+   * Load structure analysis data for a repository.
+   * Expects a file named `{repoId}-structure.json` in the data directory.
+   * Throws when the file does not exist.
+   */
+  async loadStructure(repoId: string): Promise<StructureGraph> {
+    const filename = `${repoId}-structure.json`;
+    const filePath = path.join(this.dataDir, filename);
+    const resolved = path.resolve(this.dataDir, filename);
+    if (
+      !resolved.startsWith(path.resolve(this.dataDir) + path.sep) ||
+      repoId.includes('%') ||
+      repoId.includes('\\')
+    ) {
+      throw new Error(`Invalid repository id: ${repoId}`);
+    }
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content) as StructureGraph;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`Structure data not found for repository: ${repoId}. Run processing with mode 'structure' first.`);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Load structure import edges for a repository, with optional filters.
+   * @param repoId - Repository identifier (matches filename prefix)
+   * @param fileFilter - When provided, only return edges where `from` starts with this prefix
+   * @param externalFilter - When provided, filter to only external (true) or internal (false) imports
+   */
+  async loadImports(
+    repoId: string,
+    fileFilter?: string,
+    externalFilter?: boolean
+  ): Promise<ImportEdge[]> {
+    const structure = await this.loadStructure(repoId);
+    let imports = structure.imports;
+
+    if (fileFilter !== undefined) {
+      imports = imports.filter(edge => edge.from.startsWith(fileFilter));
+    }
+
+    if (externalFilter !== undefined) {
+      imports = imports.filter(edge => edge.isExternal === externalFilter);
+    }
+
+    return imports;
   }
 
   /**

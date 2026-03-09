@@ -8,6 +8,7 @@ import {
   TimelineAnalyzer,
   FullDeltaAnalyzer,
   CouplingAnalyzer,
+  StructureAnalyzer,
 } from 'codecohesion-processor';
 
 const VERSION = '0.1.0';
@@ -25,6 +26,7 @@ Analyze options:
   --timeline         Generate Timeline V1 (adaptive sampling)
   --full-delta       Generate Timeline V2 (all commits)
   --coupling         Generate temporal coupling analysis
+  --structure        Generate static structure analysis (imports + functions)
   --output <dir>     Output directory (default: ./output)
   --view             Open viewer after analysis
 
@@ -41,6 +43,7 @@ async function analyzeCommand(args: string[]): Promise<void> {
   let timelineMode = false;
   let fullDeltaMode = false;
   let couplingMode = false;
+  let structureMode = false;
   let outputDir = './output';
   let openViewer = false;
 
@@ -52,6 +55,8 @@ async function analyzeCommand(args: string[]): Promise<void> {
       fullDeltaMode = true;
     } else if (arg === '--coupling') {
       couplingMode = true;
+    } else if (arg === '--structure') {
+      structureMode = true;
     } else if (arg === '--output' && i + 1 < args.length) {
       outputDir = args[++i];
     } else if (arg === '--view') {
@@ -124,6 +129,17 @@ async function analyzeCommand(args: string[]): Promise<void> {
     fs.writeFileSync(outputPath, JSON.stringify(timelineData, null, 2));
     console.log(`Output written to: ${outputPath}`);
     console.log(`Selected ${timelineData.timeline.baseSampling.actualCount} of ${timelineData.timeline.totalCommits} commits`);
+
+  } else if (structureMode) {
+    console.log('=== STRUCTURE ANALYSIS ===\n');
+
+    const analyzer = new StructureAnalyzer(resolvedRepoPath);
+    const structureData = await analyzer.analyze();
+
+    const outputPath = path.join(resolvedOutputDir, `${repoName}-structure.json`);
+    fs.writeFileSync(outputPath, JSON.stringify(structureData, null, 2));
+    console.log(`Output written to: ${outputPath}`);
+    console.log(`${structureData.analysis.filesAnalyzed} files, ${structureData.analysis.importEdges} imports, ${structureData.analysis.functionDecls} functions`);
 
   } else {
     // Static HEAD snapshot

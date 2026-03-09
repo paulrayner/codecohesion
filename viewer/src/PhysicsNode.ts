@@ -24,9 +24,10 @@ export class PhysicsNode implements SpatialItem {
   acceleration: THREE.Vector3;
   prevAcceleration: THREE.Vector3;
 
-  // Geometry (Gource uses TWO radii)
-  radius: number;        // dir_radius: collision detection (includes all descendants)
-  parentRadius: number;  // parent_radius: child orbit distance (direct files only)
+  // Geometry (Gource uses TWO radii + territory)
+  radius: number;           // dir_radius: collision detection (includes all descendants)
+  parentRadius: number;     // parent_radius: child orbit distance (direct files only)
+  territoryRadius: number;  // collision radius + max file orbit distance + padding
 
   // Hierarchy references
   parent: PhysicsNode | null;
@@ -35,11 +36,12 @@ export class PhysicsNode implements SpatialItem {
   // Initialization
   isInitialized: boolean = false;
 
-  constructor(layoutNode: LayoutNode, radius: number, parentRadius: number, parent: PhysicsNode | null = null) {
+  constructor(layoutNode: LayoutNode, radius: number, parentRadius: number, territoryRadius: number, parent: PhysicsNode | null = null) {
     this.layoutNode = layoutNode;
     this.directoryNode = layoutNode.node as DirectoryNode;
     this.radius = radius;
     this.parentRadius = parentRadius;
+    this.territoryRadius = territoryRadius;
     this.parent = parent;
 
     // Initialize physics state
@@ -51,32 +53,34 @@ export class PhysicsNode implements SpatialItem {
 
   /**
    * Get bounding box for spatial indexing (X/Z plane only)
-   * Uses collision radius (Gource algorithm)
+   * Uses territory radius to ensure file orbit space is included in queries
    */
   getBounds(): AABB2D {
     return {
-      minX: this.position.x - this.radius,
-      minZ: this.position.z - this.radius,
-      maxX: this.position.x + this.radius,
-      maxZ: this.position.z + this.radius
+      minX: this.position.x - this.territoryRadius,
+      minZ: this.position.z - this.territoryRadius,
+      maxX: this.position.x + this.territoryRadius,
+      maxZ: this.position.z + this.territoryRadius
     };
   }
 
   /**
-   * Check if this node overlaps with another using collision radius (Gource algorithm)
-   * Gource uses ONE radius (dir_radius) for overlap detection, not separate territory radius.
+   * Check if this node overlaps with another using territory radius.
+   * Territory radius includes file orbit space, preventing file clouds from overlapping
+   * even when directory collision radii don't touch.
    */
   overlaps(other: PhysicsNode): boolean {
     const dx = other.position.x - this.position.x;
     const dz = other.position.z - this.position.z;
     const distSq = dx * dx + dz * dz;
-    const sumRadius = this.radius + other.radius;
+    const sumRadius = this.territoryRadius + other.territoryRadius;
     return distSq < sumRadius * sumRadius;
   }
 
   /**
    * Get distance to parent (in X/Z plane)
-   * Uses parent.parentRadius (Gource: based on direct files only) for child orbit distance.
+   * Uses collision radius for tight parent-child orbits (Gource style).
+   * Territory-based separation is handled by repulsion forces between siblings.
    */
   distanceToParent(): number {
     if (!this.parent) return 0;
@@ -86,17 +90,22 @@ export class PhysicsNode implements SpatialItem {
     const dist = Math.sqrt(dx * dx + dz * dz);
 
     // Distance from edge to edge (not center to center)
-    // Uses parent.parentRadius (direct files only) instead of parent.radius (all descendants)
+    // Uses parent.parentRadius (direct files only) for child orbit distance
     return dist - this.radius - this.parent.parentRadius;
   }
 
   /**
-   * Check if another node is an ancestor of this node
+   * Check if another node is an ancestor of this node.
+   * Uses an iterative walk up the parent chain instead of recursion to avoid
+   * stack overflow on deeply nested hierarchies.
    */
   isAncestor(node: PhysicsNode): boolean {
-    if (node === this.parent) return true;
-    if (!this.parent) return false;
-    return this.parent.isAncestor(node);
+    let current: PhysicsNode | null = this.parent;
+    while (current !== null) {
+      if (current === node) return true;
+      current = current.parent;
+    }
+    return false;
   }
 
   /**

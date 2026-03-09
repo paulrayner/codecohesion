@@ -25,7 +25,7 @@
 ---
 
 > **📘 DDD & Bounded Context Detection**
-> Want to see how CodeCohesion can detect bounded contexts and analyze domain language? Check out our comprehensive vision document: **[DDD-VISION.md](DDD-VISION.md)**
+> Want to see how CodeCohesion can detect bounded contexts and analyze domain language? Check out our comprehensive vision document: **[DDD Vision](docs/plans/ddd-vision.md)**
 >
 > Covers: Temporal coupling analysis • Ubiquitous language detection • Vocabulary clustering • Connascence of name • AST-based semantic analysis
 
@@ -40,7 +40,7 @@
 - [Project Structure](#-project-structure)
 - [Design Decisions](#-design-decisions)
 - [Roadmap](#️-roadmap)
-- [DDD Vision & Analysis Plans](DDD-VISION.md) 📘
+- [DDD Vision & Analysis Plans](docs/plans/ddd-vision.md)
 - [Development](#-development)
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
@@ -255,7 +255,12 @@ codecohesion/
 │   ├── images/                    # README screenshots
 │   └── gource-reference/          # Learnings from studying Gource
 │
-├── PROGRESS.md                    # Detailed development history
+├── docs/                          # Documentation, plans, and research
+│   ├── decisions/                 # Architecture Decision Records
+│   ├── plans/                     # Roadmaps (DDD vision, API, timeline)
+│   ├── reference/                 # Technical reference docs
+│   └── research/                  # Comparisons and analysis
+│
 ├── CONTRIBUTING.md                # Guidelines for adding new features
 └── README.md                      # This file
 ```
@@ -329,7 +334,7 @@ Rather than hard-coded time intervals, the Last Modified mode adapts:
 - Architecture drift detection
 - Shareable reports and exports
 
-> **📘 For detailed DDD analysis plans** including bounded context detection, ubiquitous language analysis, and vocabulary clustering, see **[DDD-VISION.md](DDD-VISION.md)**
+> **For detailed DDD analysis plans** including bounded context detection, ubiquitous language analysis, and vocabulary clustering, see **[DDD Vision](docs/plans/ddd-vision.md)**
 
 ## 🔧 Technology Stack
 
@@ -434,7 +439,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 
 ### Documentation
 
-- **PROGRESS.md** - Comprehensive development history and lessons learned
+- **docs/progress.md** - Development progress and lessons learned
 - **CONTRIBUTING.md** - Guidelines for extending the application
 - **docs/gource-reference/** - Architectural insights from Gource study
 

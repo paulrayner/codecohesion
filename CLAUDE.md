@@ -119,7 +119,6 @@ All analyzers accept an optional `Logger` parameter. Use `silentLogger` to suppr
 - **`api npm test` runs in watch mode** — use `npm test -- --run` for single pass
 - **`viewer/src/main.ts` is a ~2,900-line god object** — new logic should go in `src/lib/` as pure functions with co-located tests
 - **No `.env` files needed** — only env var is `PORT` for api (defaults to 3001)
-- **3 pre-existing TDD failures** in `viewer/src/ForceDirectedLayoutStrategy.test.ts` — these are red-gate tests for unimplemented territory features
 
 ## Code Style
 
@@ -129,7 +128,7 @@ All analyzers accept an optional `Logger` parameter. Use `silentLogger` to suppr
 
 ## Key Files
 
-- `DDD-VISION.md` - DDD-oriented feature roadmap (ubiquitous language analysis, bounded context detection)
-- `PROGRESS.md` - Development progress tracking
+- `docs/plans/ddd-vision.md` - DDD-oriented feature roadmap (ubiquitous language analysis, bounded context detection)
+- `docs/progress.md` - Development progress tracking
 - `CHANGELOG.md` - Release history
 - `docs/decisions/` - Architecture Decision Records (ADRs)

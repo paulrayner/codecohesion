@@ -8,7 +8,7 @@ import {
   createMissingParameterError
 } from './error-helper';
 
-const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling'] as const;
+const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure'] as const;
 type ProcessingMode = typeof VALID_PROCESSING_MODES[number];
 
 export function createRoutes(): Router {
@@ -56,6 +56,15 @@ export function createRoutes(): Router {
               href: `/api/repos/${repo.id}/hotspots{?limit}`,
               templated: true,
               description: 'Get top N high-churn/high-contributor files'
+            },
+            imports: {
+              href: `/api/repos/${repo.id}/imports{?file,external}`,
+              templated: true,
+              description: 'Get import edges with optional file and external filters'
+            },
+            structure: {
+              href: `/api/repos/${repo.id}/structure`,
+              description: 'Get structure metadata and function declarations'
             }
           }
         };
@@ -87,6 +96,15 @@ export function createRoutes(): Router {
             href: `/api/repos/${repo.id}/hotspots{?limit}`,
             templated: true,
             description: 'Get top N high-churn/high-contributor files'
+          },
+          imports: {
+            href: `/api/repos/${repo.id}/imports{?file,external}`,
+            templated: true,
+            description: 'Get import edges with optional file and external filters'
+          },
+          structure: {
+            href: `/api/repos/${repo.id}/structure`,
+            description: 'Get structure metadata and function declarations'
           }
         }
       }));
@@ -119,9 +137,12 @@ export function createRoutes(): Router {
       res.json(stats);
     } catch (error) {
       console.error('Error getting stats:', error);
-      const allRepos = await dataLoader.listRepos();
-      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
-      res.status(404).json(errorResponse);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -159,9 +180,12 @@ export function createRoutes(): Router {
       res.json(contributors);
     } catch (error) {
       console.error('Error getting contributors:', error);
-      const allRepos = await dataLoader.listRepos();
-      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
-      res.status(404).json(errorResponse);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -252,9 +276,12 @@ export function createRoutes(): Router {
       res.json(files);
     } catch (error) {
       console.error('Error getting files:', error);
-      const allRepos = await dataLoader.listRepos();
-      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
-      res.status(404).json(errorResponse);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -269,7 +296,7 @@ export function createRoutes(): Router {
 
       const limitNum = limit ? parseInt(limit as string, 10) : 20;
 
-      if (limitNum < 1 || limitNum > 100) {
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
         const error = createInvalidParameterError(
           'limit',
           limitNum,
@@ -283,6 +310,114 @@ export function createRoutes(): Router {
       res.json(hotspots);
     } catch (error) {
       console.error('Error getting hotspots:', error);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/imports
+   * Get import edges for a repository with optional ?file= and ?external= filters.
+   * Requires a structure analysis to have been run first (mode 'structure').
+   */
+  router.get('/repos/:repoId/imports', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const { file, external } = req.query;
+
+      // Parse optional ?external= boolean filter
+      let externalFilter: boolean | undefined;
+      if (external !== undefined) {
+        if (external === 'true') {
+          externalFilter = true;
+        } else if (external === 'false') {
+          externalFilter = false;
+        } else {
+          const error = createInvalidParameterError(
+            'external',
+            external,
+            'must be "true" or "false"',
+            `https://codecohesion-api.railway.app/api/repos/${repoId}/imports?external=true`
+          );
+          return res.status(400).json(error);
+        }
+      }
+
+      const imports = await dataLoader.loadImports(
+        repoId,
+        file as string | undefined,
+        externalFilter
+      );
+
+      res.json({
+        repository: { id: repoId },
+        filters: {
+          file: (file as string | undefined) ?? null,
+          external: externalFilter ?? null
+        },
+        imports,
+        total: imports.length,
+        _links: {
+          self: { href: `/api/repos/${repoId}/imports` },
+          structure: {
+            href: `/api/repos/${repoId}/structure`,
+            description: 'Get full structure metadata and function declarations'
+          }
+        }
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Structure data not found')) {
+        return res.status(404).json({
+          error: 'Structure data not found',
+          code: 'NOT_FOUND',
+          message: error.message
+        });
+      }
+      console.error('Error getting imports:', error);
+      const allRepos = await dataLoader.listRepos();
+      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+      res.status(404).json(errorResponse);
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/structure
+   * Get structure metadata and function declarations.
+   * Requires a structure analysis to have been run first (mode 'structure').
+   */
+  router.get('/repos/:repoId/structure', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const structure = await dataLoader.loadStructure(repoId);
+
+      res.json({
+        repository: { id: repoId },
+        analyzedAt: structure.analyzedAt,
+        repositoryPath: structure.repositoryPath,
+        analysis: structure.analysis,
+        functions: structure.functions,
+        _links: {
+          self: { href: `/api/repos/${repoId}/structure` },
+          imports: {
+            href: `/api/repos/${repoId}/imports{?file,external}`,
+            templated: true,
+            description: 'Get import edges with optional file and external filters'
+          }
+        }
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Structure data not found')) {
+        return res.status(404).json({
+          error: 'Structure data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting structure:', error);
       const allRepos = await dataLoader.listRepos();
       const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
       res.status(404).json(errorResponse);

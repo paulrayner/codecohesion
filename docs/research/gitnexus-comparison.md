@@ -35,7 +35,7 @@ GitNexus's `impact` tool ("47 functions depend on this return type") is concrete
 
 ### 2. MCP as the delivery mechanism for AI agents
 
-GitNexus's main value isn't the graph itself; it's exposing that graph through MCP tools so agents can query it mid-task. The DDD-VISION.md already mentions this. GitNexus validates the approach: 7 focused tools with clear purposes beats a generic "here's the graph" dump.
+GitNexus's main value isn't the graph itself; it's exposing that graph through MCP tools so agents can query it mid-task. The DDD vision document already mentions this. GitNexus validates the approach: 7 focused tools with clear purposes beats a generic "here's the graph" dump.
 
 ### 3. Confidence scoring on relationships
 
@@ -58,9 +58,9 @@ GitNexus's core insight: don't hand the LLM a graph and hope it explores enough.
 
 ## Concrete Ideas for CodeCohesion's Roadmap
 
-1. **Add an MCP server** exposing coupling clusters, hotspots, and co-change predictions as tools. Already in DDD-VISION.md; GitNexus proves the market wants it.
+1. **Add an MCP server** exposing coupling clusters, hotspots, and co-change predictions as tools. Already in the DDD vision; GitNexus proves the market wants it.
 2. **"Coupling impact" tool**: given a file, return all files with >X% co-change rate, grouped by coupling strength. Analogous to GitNexus's `impact` but temporal.
-3. **Combine both signals**: integrating Tree-sitter parsing (Phase 5 of DDD-VISION.md) would allow scoring relationships on *both* structural dependency AND temporal coupling. That would be uniquely powerful; neither tool does both today.
+3. **Combine both signals**: integrating Tree-sitter parsing (Phase 5 of the DDD vision) would allow scoring relationships on *both* structural dependency AND temporal coupling. That would be uniquely powerful; neither tool does both today.
 
 ## GitNexus Technical Details
 
