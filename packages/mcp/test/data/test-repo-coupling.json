@@ -1,0 +1,41 @@
+{
+  "format": "coupling-v1",
+  "repositoryPath": "/test/repo",
+  "sourceTimeline": "test-repo-timeline.json",
+  "analysis": {
+    "totalCommits": 100,
+    "filesAnalyzed": 4,
+    "couplingEdges": 2,
+    "generatedAt": "2026-03-08T00:00:00.000Z"
+  },
+  "edges": [
+    {
+      "fileA": "src/A.ts",
+      "fileB": "src/B.ts",
+      "coChangeCount": 30,
+      "coupling": 0.85
+    },
+    {
+      "fileA": "src/C.ts",
+      "fileB": "src/D.ts",
+      "coChangeCount": 15,
+      "coupling": 0.60
+    }
+  ],
+  "clusters": [
+    {
+      "id": 1,
+      "name": "Cluster 1",
+      "files": ["src/A.ts", "src/B.ts"],
+      "fileCount": 2,
+      "avgInternalCoupling": 0.85
+    },
+    {
+      "id": 2,
+      "name": "Cluster 2",
+      "files": ["src/C.ts", "src/D.ts"],
+      "fileCount": 2,
+      "avgInternalCoupling": 0.60
+    }
+  ]
+}

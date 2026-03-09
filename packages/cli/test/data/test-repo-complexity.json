@@ -1,0 +1,115 @@
+{
+  "format": "complexity-v1",
+  "repositoryPath": "/test/repo",
+  "analyzedAt": "2026-03-08T00:00:00.000Z",
+  "analysis": {
+    "filesAnalyzed": 5,
+    "functionsAnalyzed": 12,
+    "avgCyclomatic": 3.5,
+    "avgCognitive": 4.2
+  },
+  "files": [
+    {
+      "file": "src/A.ts",
+      "totalCyclomatic": 10,
+      "totalCognitive": 12,
+      "maxCyclomatic": 6,
+      "maxCognitive": 8,
+      "functionCount": 3,
+      "functions": [
+        { "name": "doWork", "kind": "function", "line": 1, "endLine": 20, "cyclomatic": 6, "cognitive": 8 },
+        { "name": "helper", "kind": "function", "line": 22, "endLine": 35, "cyclomatic": 2, "cognitive": 2 },
+        { "name": "init", "kind": "arrow", "line": 37, "endLine": 42, "cyclomatic": 2, "cognitive": 2 }
+      ]
+    },
+    {
+      "file": "src/B.ts",
+      "totalCyclomatic": 8,
+      "totalCognitive": 9,
+      "maxCyclomatic": 5,
+      "maxCognitive": 6,
+      "functionCount": 2,
+      "functions": [
+        { "name": "parse", "kind": "function", "line": 1, "endLine": 25, "cyclomatic": 5, "cognitive": 6 },
+        { "name": "validate", "kind": "function", "line": 27, "endLine": 40, "cyclomatic": 3, "cognitive": 3 }
+      ]
+    },
+    {
+      "file": "src/C.ts",
+      "totalCyclomatic": 4,
+      "totalCognitive": 3,
+      "maxCyclomatic": 3,
+      "maxCognitive": 3,
+      "functionCount": 2,
+      "functions": [
+        { "name": "render", "kind": "function", "line": 1, "endLine": 15, "cyclomatic": 3, "cognitive": 3 },
+        { "name": "format", "kind": "arrow", "line": 17, "endLine": 22, "cyclomatic": 1, "cognitive": 0 }
+      ]
+    },
+    {
+      "file": "src/D.ts",
+      "totalCyclomatic": 2,
+      "totalCognitive": 1,
+      "maxCyclomatic": 2,
+      "maxCognitive": 1,
+      "functionCount": 2,
+      "functions": [
+        { "name": "load", "kind": "function", "line": 1, "endLine": 10, "cyclomatic": 2, "cognitive": 1 },
+        { "name": "unload", "kind": "function", "line": 12, "endLine": 18, "cyclomatic": 1, "cognitive": 0 }
+      ]
+    },
+    {
+      "file": "src/E.ts",
+      "totalCyclomatic": 1,
+      "totalCognitive": 0,
+      "maxCyclomatic": 1,
+      "maxCognitive": 0,
+      "functionCount": 1,
+      "functions": [
+        { "name": "noop", "kind": "arrow", "line": 1, "endLine": 3, "cyclomatic": 1, "cognitive": 0 }
+      ]
+    }
+  ],
+  "hotspots": [
+    {
+      "file": "src/A.ts",
+      "complexityScore": 0.95,
+      "churnScore": 0.90,
+      "hotspotScore": 0.855,
+      "totalCyclomatic": 10,
+      "commitCount": 45
+    },
+    {
+      "file": "src/B.ts",
+      "complexityScore": 0.75,
+      "churnScore": 0.70,
+      "hotspotScore": 0.525,
+      "totalCyclomatic": 8,
+      "commitCount": 35
+    },
+    {
+      "file": "src/C.ts",
+      "complexityScore": 0.40,
+      "churnScore": 0.50,
+      "hotspotScore": 0.200,
+      "totalCyclomatic": 4,
+      "commitCount": 25
+    },
+    {
+      "file": "src/D.ts",
+      "complexityScore": 0.20,
+      "churnScore": 0.30,
+      "hotspotScore": 0.060,
+      "totalCyclomatic": 2,
+      "commitCount": 15
+    },
+    {
+      "file": "src/E.ts",
+      "complexityScore": 0.05,
+      "churnScore": 0.10,
+      "hotspotScore": 0.005,
+      "totalCyclomatic": 1,
+      "commitCount": 5
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@codecohesion/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for CodeCohesion repository analysis tools",
+  "main": "dist/index.js",
+  "bin": {
+    "codecohesion-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@codecohesion/shared-types": "*",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "codecohesion-processor": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "vitest": "^2.0.0"
+  }
+}

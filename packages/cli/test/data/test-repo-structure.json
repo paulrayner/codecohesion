@@ -1,0 +1,35 @@
+{
+  "format": "structure-v1",
+  "repositoryPath": "/test/repo",
+  "analyzedAt": "2026-03-08T00:00:00.000Z",
+  "analysis": {
+    "filesAnalyzed": 3,
+    "importEdges": 2,
+    "functionDecls": 6,
+    "parseErrors": 0
+  },
+  "imports": [
+    {
+      "from": "src/A.ts",
+      "to": "src/B.ts",
+      "toRaw": "./B",
+      "symbols": ["parse"],
+      "isExternal": false
+    },
+    {
+      "from": "src/C.ts",
+      "to": "src/A.ts",
+      "toRaw": "./A",
+      "symbols": ["doWork"],
+      "isExternal": false
+    }
+  ],
+  "functions": [
+    { "file": "src/A.ts", "name": "doWork", "kind": "function", "line": 1, "endLine": 20, "params": ["input"], "isExported": true },
+    { "file": "src/A.ts", "name": "helper", "kind": "function", "line": 22, "endLine": 35, "params": [], "isExported": false },
+    { "file": "src/B.ts", "name": "parse", "kind": "function", "line": 1, "endLine": 25, "params": ["raw"], "isExported": true },
+    { "file": "src/B.ts", "name": "validate", "kind": "function", "line": 27, "endLine": 40, "params": ["value"], "isExported": false },
+    { "file": "src/C.ts", "name": "render", "kind": "function", "line": 1, "endLine": 15, "params": ["data"], "isExported": true },
+    { "file": "src/C.ts", "name": "format", "kind": "arrow", "line": 17, "endLine": 22, "params": ["s"], "isExported": false }
+  ]
+}
