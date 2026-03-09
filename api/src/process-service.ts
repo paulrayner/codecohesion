@@ -11,6 +11,7 @@ import {
   FullDeltaAnalyzer,
   CouplingAnalyzer,
   StructureAnalyzer,
+  ComplexityAnalyzer,
   Logger,
 } from 'codecohesion-processor';
 import type { RepositorySnapshot } from './types';
@@ -23,9 +24,9 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_DATA_DIR = path.join(__dirname, '../../viewer/public/data');
 const CLONE_BASE_DIR = path.join(os.tmpdir(), 'codecohesion-clones');
 
-export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'coupling' | 'structure';
+export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'coupling' | 'structure' | 'complexity';
 
-const VALID_MODES = new Set<ProcessMode>(['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure']);
+const VALID_MODES = new Set<ProcessMode>(['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure', 'complexity']);
 
 export interface ProcessJob {
   id: string;
@@ -366,6 +367,9 @@ export class ProcessService {
 
       case 'structure':
         return this.runStructureAnalysis(localPath, repoName, logger);
+
+      case 'complexity':
+        return this.runComplexityAnalysis(localPath, repoName, logger);
     }
   }
 
@@ -436,6 +440,24 @@ export class ProcessService {
     const analyzer = new StructureAnalyzer(localPath, logger);
     const structureData = await analyzer.analyze();
     return this.writeOutput(`${repoName}-structure`, structureData);
+  }
+
+  private async runComplexityAnalysis(
+    localPath: string,
+    repoName: string,
+    logger: Logger
+  ): Promise<string> {
+    // Complexity analysis requires structure data first so we have function bodies.
+    const structureAnalyzer = new StructureAnalyzer(localPath, logger);
+    const structureData = await structureAnalyzer.analyze();
+
+    // HEAD snapshot provides churn data needed to compute hotspot scores.
+    const headAnalyzer = new RepositoryAnalyzer(localPath, logger);
+    const snapshot = await headAnalyzer.analyze();
+
+    const complexityAnalyzer = new ComplexityAnalyzer(logger);
+    const complexityData = complexityAnalyzer.analyze(structureData, snapshot);
+    return this.writeOutput(`${repoName}-complexity`, complexityData);
   }
 
   /**

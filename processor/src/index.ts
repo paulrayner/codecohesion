@@ -8,3 +8,4 @@ export { StructureAnalyzer } from './structure-analyzer';
 export type { StructureGraph, ImportEdge, FunctionDecl } from './structure-types';
 export { ComplexityAnalyzer } from './complexity-analyzer';
 export type { ComplexityReport, FileComplexity, FunctionComplexity, HotspotEntry } from './complexity-types';
+export type { CouplingGraph, CouplingEdge, Cluster } from './coupling-types';

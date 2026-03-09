@@ -7,8 +7,9 @@ import {
   createInvalidParameterError,
   createMissingParameterError
 } from './error-helper';
+import { openApiSpec } from './openapi-spec';
 
-const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure'] as const;
+const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure', 'complexity'] as const;
 type ProcessingMode = typeof VALID_PROCESSING_MODES[number];
 
 export function createRoutes(): Router {
@@ -65,6 +66,28 @@ export function createRoutes(): Router {
             structure: {
               href: `/api/repos/${repo.id}/structure`,
               description: 'Get structure metadata and function declarations'
+            },
+            complexity: {
+              href: `/api/repos/${repo.id}/complexity`,
+              description: 'Get complexity analysis data (requires complexity mode run)'
+            },
+            impact: {
+              href: `/api/repos/${repo.id}/impact{/filePath}`,
+              templated: true,
+              description: 'Get transitive impact analysis for a file in the dependency graph'
+            },
+            context: {
+              href: `/api/repos/${repo.id}/context{/filePath}`,
+              templated: true,
+              description: 'Get file context — ownership, imports, functions, and optional coupling'
+            },
+            coupling: {
+              href: `/api/repos/${repo.id}/coupling`,
+              description: 'Get full coupling graph (requires coupling mode run)'
+            },
+            health: {
+              href: `/api/repos/${repo.id}/health`,
+              description: 'Get composite health score for the repository'
             }
           }
         };
@@ -105,6 +128,28 @@ export function createRoutes(): Router {
           structure: {
             href: `/api/repos/${repo.id}/structure`,
             description: 'Get structure metadata and function declarations'
+          },
+          complexity: {
+            href: `/api/repos/${repo.id}/complexity`,
+            description: 'Get complexity analysis data (requires complexity mode run)'
+          },
+          impact: {
+            href: `/api/repos/${repo.id}/impact{/filePath}`,
+            templated: true,
+            description: 'Get transitive impact analysis for a file in the dependency graph'
+          },
+          context: {
+            href: `/api/repos/${repo.id}/context{/filePath}`,
+            templated: true,
+            description: 'Get file context — ownership, imports, functions, and optional coupling'
+          },
+          coupling: {
+            href: `/api/repos/${repo.id}/coupling`,
+            description: 'Get full coupling graph (requires coupling mode run)'
+          },
+          health: {
+            href: `/api/repos/${repo.id}/health`,
+            description: 'Get composite health score for the repository'
           }
         }
       }));
@@ -425,6 +470,178 @@ export function createRoutes(): Router {
   });
 
   /**
+   * GET /api/repos/:repoId/context/:filePath(*)
+   * Get file context — ownership, imports, functions, and optional coupling.
+   */
+  router.get('/repos/:repoId/context/*', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const filePath = req.params[0];
+
+      const context = await queryService.getContext(repoId, filePath);
+      res.json(context);
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        return res.status(404).json({ error: `Repository 'not found' for id: ${req.params.repoId}` });
+      }
+      console.error('Error getting context:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/impact/:filePath(*)
+   * Get transitive impact analysis for a file in the dependency graph.
+   * Requires a structure analysis to have been run first (mode 'structure').
+   */
+  router.get('/repos/:repoId/impact/*', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      // Express wildcard captures the remainder as req.params[0]
+      const filePath = req.params[0];
+
+      const impact = await queryService.getImpact(repoId, filePath);
+      res.json(impact);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Structure data not found')) {
+        return res.status(404).json({
+          error: 'Structure data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting impact:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/health
+   * Get composite health score for a repository.
+   * Always available when a snapshot exists; complexity/coupling data is optional.
+   */
+  router.get('/repos/:repoId/health', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const health = await queryService.getHealth(repoId);
+      res.json(health);
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      console.error('Error getting health score:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/complexity
+   * Get complexity analysis data for a repository.
+   * Requires a complexity analysis to have been run first (mode 'complexity').
+   */
+  router.get('/repos/:repoId/complexity', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const data = await queryService.getComplexity(repoId);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Complexity data not found')) {
+        return res.status(404).json({
+          error: 'Complexity data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting complexity:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/complexity/hotspots
+   * Get top-N hotspot entries sorted by hotspot score descending.
+   * Requires a complexity analysis to have been run first (mode 'complexity').
+   */
+  router.get('/repos/:repoId/complexity/hotspots', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const { limit } = req.query;
+
+      const limitNum = limit ? parseInt(limit as string, 10) : 20;
+
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        const error = createInvalidParameterError(
+          'limit',
+          limitNum,
+          'must be between 1 and 100',
+          `https://codecohesion-api.railway.app/api/repos/${repoId}/complexity/hotspots?limit=20`
+        );
+        return res.status(400).json(error);
+      }
+
+      const hotspots = await queryService.getComplexityHotspots(repoId, limitNum);
+      res.json(hotspots);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Complexity data not found')) {
+        return res.status(404).json({
+          error: 'Complexity data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting complexity hotspots:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/coupling
+   * Get full coupling graph (edges, clusters, analysis metadata) for a repository.
+   * Requires a coupling analysis to have been run first (mode 'coupling').
+   */
+  router.get('/repos/:repoId/coupling', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const data = await queryService.getCoupling(repoId);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Coupling data not found')) {
+        return res.status(404).json({
+          error: 'Coupling data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message,
+        });
+      }
+      console.error('Error getting coupling:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/coupling/:filePath(*)
+   * Get coupling edges for a specific file, sorted by coupling descending.
+   * Requires a coupling analysis to have been run first (mode 'coupling').
+   */
+  router.get('/repos/:repoId/coupling/*', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const filePath = req.params[0];
+      const data = await queryService.getCouplingForFile(repoId, filePath);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Coupling data not found')) {
+        return res.status(404).json({
+          error: 'Coupling data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message,
+        });
+      }
+      console.error('Error getting coupling for file:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * POST /api/process
    * Start a processing job for a repository
    */
@@ -529,6 +746,42 @@ export function createRoutes(): Router {
     req.on('close', () => {
       emitter.off('progress', onProgress);
     });
+  });
+
+  /**
+   * GET /api/docs
+   * Serves the OpenAPI 3.1 JSON specification for this API.
+   */
+  router.get('/docs', (_req: Request, res: Response) => {
+    res.json(openApiSpec);
+  });
+
+  /**
+   * GET /api/docs/ui
+   * Serves a Swagger UI HTML page that loads the spec from /api/docs.
+   * Uses a CDN-hosted Swagger UI bundle — no local dependency required.
+   */
+  router.get('/docs/ui', (_req: Request, res: Response) => {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CodeCohesion API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/api/docs',
+      dom_id: '#swagger-ui',
+    });
+  </script>
+</body>
+</html>`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
   });
 
   return router;

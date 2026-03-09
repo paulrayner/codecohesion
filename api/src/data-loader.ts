@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { RepositorySnapshot, TimelineData, RepoListItem, RepoInfo } from './types';
 import { LRUCache } from './lru-cache';
-import type { StructureGraph, ImportEdge } from 'codecohesion-processor';
+import type { StructureGraph, ImportEdge, ComplexityReport, CouplingGraph } from 'codecohesion-processor';
 
 export class DataLoader {
   private dataDir: string;
@@ -42,6 +42,33 @@ export class DataLoader {
   }
 
   /**
+   * Load snapshot data for a repository by ID directly.
+   * Expects a file named `{repoId}.json` in the data directory.
+   * Throws when the file does not exist.
+   */
+  async loadSnapshot(repoId: string): Promise<RepositorySnapshot | TimelineData> {
+    const filename = `${repoId}.json`;
+    const filePath = path.join(this.dataDir, filename);
+    const resolved = path.resolve(this.dataDir, filename);
+    if (
+      !resolved.startsWith(path.resolve(this.dataDir) + path.sep) ||
+      repoId.includes('%') ||
+      repoId.includes('\\')
+    ) {
+      throw new Error(`Invalid repository id: ${repoId}`);
+    }
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content) as RepositorySnapshot | TimelineData;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`Repository not found: ${repoId}`);
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Load structure analysis data for a repository.
    * Expects a file named `{repoId}-structure.json` in the data directory.
    * Throws when the file does not exist.
@@ -63,6 +90,60 @@ export class DataLoader {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error(`Structure data not found for repository: ${repoId}. Run processing with mode 'structure' first.`);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Load complexity analysis data for a repository.
+   * Expects a file named `{repoId}-complexity.json` in the data directory.
+   * Throws when the file does not exist.
+   */
+  async loadComplexity(repoId: string): Promise<ComplexityReport> {
+    const filename = `${repoId}-complexity.json`;
+    const filePath = path.join(this.dataDir, filename);
+    const resolved = path.resolve(this.dataDir, filename);
+    if (
+      !resolved.startsWith(path.resolve(this.dataDir) + path.sep) ||
+      repoId.includes('%') ||
+      repoId.includes('\\')
+    ) {
+      throw new Error(`Invalid repository id: ${repoId}`);
+    }
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content) as ComplexityReport;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`Complexity data not found for repository: ${repoId}. Run processing with mode 'complexity' first.`);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Load coupling analysis data for a repository.
+   * Expects a file named `{repoId}-coupling.json` in the data directory.
+   * Throws when the file does not exist.
+   */
+  async loadCoupling(repoId: string): Promise<CouplingGraph> {
+    const filename = `${repoId}-coupling.json`;
+    const filePath = path.join(this.dataDir, filename);
+    const resolved = path.resolve(this.dataDir, filename);
+    if (
+      !resolved.startsWith(path.resolve(this.dataDir) + path.sep) ||
+      repoId.includes('%') ||
+      repoId.includes('\\')
+    ) {
+      throw new Error(`Invalid repository id: ${repoId}`);
+    }
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content) as CouplingGraph;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`Coupling data not found for repository: ${repoId}. Run processing with mode 'coupling' first.`);
       }
       throw err;
     }
