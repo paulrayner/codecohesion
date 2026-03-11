@@ -253,3 +253,268 @@ Generated JSON files in `viewer/public/data/` are gitignored. After running the 
 ## Viewer
 
 All data files copied to `viewer/public/data/`. Viewer running at http://localhost:3000/. Both repos should appear in the dropdown. Available color modes include "Bounded Contexts" (cluster view) when coupling data is loaded.
+
+---
+
+## Deep Dive Investigations (March 11, follow-up)
+
+Analysis scripts stored at `/tmp/codecohesion-analysis/`. All findings derived from the timeline-full and coupling JSON data produced by Eric's branch.
+
+### 10. Agent Quality by Individual Identity
+
+**Problem:** The aggregate agent-vs-human stats hide significant variation between individual agents. With 291 agent identities, some agents may be consistently high-quality while others generate excessive rework. Understanding per-agent quality profiles would let Steve tune or retire underperforming agents.
+
+**Method:** For each agent with 50+ commits, measured fix-to-feat ratio, fix-after-feat rate (fix within 48h on same file after a feat), revert rate, and commit size (median/P90 files changed).
+
+#### Highest-Quality Agents
+
+| Agent | Commits | Fix:Feat | Fix-After-Feat | Revert% | P90 Files |
+|-------|---------|----------|----------------|---------|-----------|
+| gastown/crew/jack | 64 | 1.35 | 13.0% | 1.6% | 7 |
+| rictus | 85 | 1.50 | 13.3% | 0.0% | 5 |
+| nux | 124 | 1.71 | 23.8% | 0.8% | 5 |
+| furiosa | 189 | 1.91 | 20.0% | 0.0% | 5 |
+| gastown/crew/dennis | 95 | 1.92 | 0.0% | 1.1% | 4 |
+
+`gastown/crew/dennis` stands out: zero fix-after-feat, low fix-to-feat, low revert rate, and small commits. Arguably the highest-quality agent overall.
+
+#### Lowest-Quality Agents
+
+| Agent | Commits | Fix:Feat | Fix-After-Feat | Revert% | P90 Files |
+|-------|---------|----------|----------------|---------|-----------|
+| julianknutsen | 201 | 9.25 | 68.8% | 4.0% | 7 |
+| gastown/crew/joe | 72 | 11.50 | 0.0% | 1.4% | 5 |
+| beads/crew/lizzy | 81 | 5.25 | 12.5% | 0.0% | 11 |
+| mayor | 574 | 4.04 | 52.1% | 1.4% | 5 |
+| obsidian | 98 | 3.82 | 35.3% | 3.1% | 9 |
+
+`julianknutsen` has the worst combined profile: 9.25 fix-to-feat ratio, 68.8% fix-after-feat rate, 4.0% revert rate. `mayor` is the highest-volume agent (574 commits) but over half its features need a same-file fix within 48 hours.
+
+#### Human Baseline Comparison
+
+The human baseline fix-after-feat rate is 62.4%, driven largely by Steve Yegge at 66.4%. This is actually worse than most agents. However, Steve's fix-to-feat ratio (1.62) is better than all but two agents, suggesting humans iterate differently: they fix quickly but their initial features are more focused.
+
+Special-purpose agents like `beads/refinery` and `beads/witness` have infinite fix-to-feat ratios because they produce no features at all; they exist solely for maintenance tasks.
+
+### 11. daemon.go God-Object Trajectory
+
+**Problem:** The initial analysis flagged `internal/daemon/daemon.go` in gastown as accelerating from 39 to 50 to 93 monthly touches, suggesting a god-object trajectory. Quantifying the coupling fan-out and author sprawl would determine whether this file is becoming a refactoring bottleneck.
+
+**Method:** Tracked weekly touch frequency, distinct authors, coupling fan-out from the coupling data, and commit type breakdown. Compared against beads' `cmd/bd/main.go` as a known god-object precedent.
+
+#### Gastown daemon.go
+
+- **204 of 6,049 commits** (3.4%) modify daemon.go across 13 active weeks
+- **60 distinct authors** have touched the file. January and February each saw 32 different authors.
+- **Touch rate is accelerating**: first-half average 14.3/week, second-half 16.9/week (+18%)
+- **Peak week**: W09 2026 with 39 touches
+- **51% of commits are fixes**, 26% are features. The 2:1 fix-to-feat ratio indicates the file accumulates defects alongside new functionality.
+
+#### Coupling Fan-Out (Surprisingly Low)
+
+Only 4 files co-change with daemon.go in the coupling data:
+
+| File | Co-Changes | Coupling |
+|------|-----------|----------|
+| internal/daemon/lifecycle.go | 40 | 0.158 |
+| internal/beads/daemon_test.go | 2 | 0.400 |
+| internal/doctor/bd_daemon_check.go | 2 | 0.286 |
+| internal/cmd/account.go | 2 | 0.111 |
+
+The low fan-out is itself a god-object symptom: everything gets stuffed into one file rather than decomposed into collaborators. Changes are broad and self-contained rather than rippling outward.
+
+#### Beads Comparison: cmd/bd/main.go
+
+Beads' `cmd/bd/main.go` shows a very similar trajectory: 286 touches (3.6% of commits), 67 distinct authors. `cmd/bd/sync.go` was deleted on 2026-03-02 in a cleanup commit. Before deletion, main.go averaged 12.1 touches/week; after, 15.5/week (only 2 weeks of data, too early to conclude).
+
+The parallel is clear: gastown's daemon.go is where beads' main.go/sync.go were before the February pruning. Gastown should anticipate a similar decomposition need.
+
+### 12. February Pruning Event in Beads (Before/After Coupling)
+
+**Problem:** Beads deleted 757 files in February 2026 with net -164. The initial analysis noted coupling shifted from `.beads <-> cmd` to `cmd/bd <-> internal/storage`. Did the pruning actually reduce architectural coupling, or just move it?
+
+**Method:** Split all commits at the February 2026 boundary. Calculated temporal coupling (file pairs co-changing within the same commit) for each period. Mapped the sync.go decomposition and tracked net file changes by directory.
+
+#### The Pruning Was a "Try, Revert, Redo" Process
+
+579 files deleted, 549 created in February. Most files were deleted and re-created exactly twice:
+
+1. **Feb 6-10**: First attempt to remove SQLite backend (-138 files)
+2. **Feb 11**: Revert ("premature dolt transition", +155 files restored)
+3. **Feb 15**: Successful removal (-135 files, Phase 6)
+
+The pruning happened in clearly labeled phases:
+- **Phase 2** (Feb 10): Delete SQLite storage backend
+- **Phase 4** (Feb 15): Remove tombstone/soft-delete system
+- **Phase 5** (Feb 15): Remove JSONL sync layer (-27 files)
+- **Phase 6** (Feb 15): Remove SQLite backend (successful this time)
+- **Daemon/RPC removal** (Feb 10): -70 files for daemon, -46 for RPC
+
+#### sync.go Was Actually Deleted in November 2025
+
+The literal `internal/daemonrunner/sync.go` was deleted on **2025-11-07** along with the entire `daemonrunner/` package (~1,500 LOC, 16 files). The February pruning targeted the broader sync ecosystem: 44+ `sync_*.go` files in `cmd/bd/` were deleted across several waves in Feb 10-22.
+
+#### Replacement Architecture
+
+The sync subsystem was replaced by cleaner, domain-specific packages:
+- `internal/tracker/` (7 new files): Plugin-based issue tracker framework
+- `internal/jira/` (8 new files): Extracted Jira integration
+- `internal/gitlab/` and `internal/linear/` (3 files each): Dedicated tracker packages
+- `internal/doltserver/` (6 new files): Self-managing Dolt server replacing daemon/RPC
+
+Net file changes by directory (February):
+- `internal/storage/`: -115 files (biggest loser)
+- `internal/rpc/`: -38 files
+- `cmd/bd/`: -29 files
+- `internal/tracker/`: +7 files (replacement)
+- `internal/jira/`: +8 files (replacement)
+- `internal/doltserver/`: +6 files (replacement)
+
+#### Before/After Coupling: The Pruning Worked, Mostly
+
+| Metric | Pre-February | February Onward | Change |
+|--------|-------------|-----------------|--------|
+| High-coupling pairs (>=5 co-changes) | 768 | 331 | **-57%** |
+| Average co-change count per pair | 1.62 | 1.39 | -14% |
+| `.beads <-> cmd` coupling | 3.3% of total | 0.1% of total | **-97%** |
+| `cmd/bd <-> internal/storage` coupling | 7.2% of total | 8.4% of total | +17% |
+
+The `.beads <-> cmd` coupling collapsed almost entirely. But `cmd/bd <-> internal/storage` coupling intensified slightly, with the hotspot being `cmd/bd/main.go <-> internal/storage/dolt/store.go` (21 co-changes). Post-pruning, the top coupling pairs shifted to `.beads/backup/` data files (backup_state.json, issues.jsonl, events.jsonl), which is expected operational coupling, not architectural coupling.
+
+**Verdict:** The pruning successfully eliminated the sync-layer coupling problem. The new `cmd/bd <-> internal/storage/dolt` coupling is a conscious trade (Dolt migration), not accidental. The coupling graph is healthier, though main.go remains a hotspot.
+
+### 13. Weekend/Off-Hours Agent Autonomy
+
+**Problem:** The data contains timestamps for all commits. If agents run unsupervised on weekends or overnight, their quality during those periods (vs. supervised hours) would reveal whether autonomous agent operation is safe.
+
+**Method:** Classified all commits by hour (Pacific Time, UTC-8) and day of week. Defined "supervised" as agent commits during human business hours (8am-6pm PT weekdays) and "unsupervised" as all other times. Compared quality metrics between the two.
+
+#### Agents Are 1.3x More Weekend-Active Than Humans
+
+|  | Weekday | Weekend | Weekend % |
+|--|---------|---------|-----------|
+| Agents | 2,992 | 1,894 | 38.8% |
+| Humans | 6,316 | 2,698 | 29.9% |
+
+Most weekend-heavy agents: `beads/crew/lizzy` (74.1% weekend), `gastown/refinery` (62.6%), `beads/refinery` (60.3%), `gastown/crew/tom` (64.0%).
+
+#### Supervised vs. Unsupervised Quality
+
+| Metric | Supervised | Unsupervised |
+|--------|-----------|-------------|
+| Total agent commits | 1,380 | 3,506 |
+| Revert rate | 1.09% | 1.31% |
+| Fix-after-feat rate | 48.8% | **163.4%** |
+| Avg files/commit | 3.2 | 3.2 |
+
+The revert rate is nearly identical, and commit size is the same. But the fix-after-feat rate is dramatically higher for unsupervised commits (163.4% vs 48.8%), meaning features shipped without human oversight generate multiple follow-up fixes per feature. This is the strongest signal in the data: **unsupervised agent features are 3.3x more likely to need rework**.
+
+#### Longest Autonomous Streaks
+
+509 agent-only streaks found. The longest was **2.0 days** in gastown (13 commits by 10 different agents, Jan 22-24). 11 streaks exceeded 24 hours, 28 exceeded 12 hours.
+
+The longest streaks are overwhelmingly fix-heavy (e.g., 11 of 13 commits in the longest streak were fixes). Agents autonomously respond to breakage but rarely ship large new features unsupervised.
+
+#### Steve Yegge Is a Night Owl
+
+29.1% of Steve's commits fall in off-hours (10pm-7am PT), with 27.3% between 10pm and 3am. Peak hours: 16:00 (520 commits), 21:00 (496), 22:00 (483), 23:00 (478). His busiest day is Sunday (1,345 commits). This blurs the supervised/unsupervised boundary since he's often active late at night when agents are also running.
+
+### 14. Tag-Triggered Cascade Response Times
+
+**Problem:** The initial analysis detected 2,007 cascade events and noted the Dec 21 v0.33.0 tag triggered 408+ gastown responses. Understanding the actual lag between beads tags and gastown responses would reveal whether the cross-repo integration is CI-driven (minutes) or human-initiated (hours).
+
+**Method:** For each of 105 beads version tags, found the first gastown commit that touches beads-related files or mentions "beads" in the message, and measured the time lag. Counted total gastown response commits within 48 hours of each tag.
+
+#### Response Is Fast, Human-Driven, and Universal
+
+- **Median lag: 0.6 hours** (36 minutes)
+- **Mean lag: 3.3 hours**
+- 37 of 54 post-gastown tags (69%) got a response within 1 hour
+- Only one tag (v0.49.1) took longer than 48 hours (65.4h)
+- **Zero missed tags**: every post-gastown beads tag triggered at least one gastown response
+
+| Lag | Count |
+|-----|-------|
+| <1 hour | 37 |
+| 1-6 hours | 8 |
+| 6-24 hours | 8 |
+| 1-3 days | 1 |
+
+#### Not Automated
+
+Steve Yegge is the first responder for **20 of 54 tags** (37%). Bot authors (dependabot, renovate) account for only 7 of ~4,900 cascade commits total. The integration is clearly manual, with Steve personally shepherding most beads releases into gastown. Some gastown agents (crew/joe, crew/max, crew/george) are first responders for individual tags, suggesting Steve sometimes delegates the integration to agents.
+
+#### Cascade Volume
+
+The Dec 20-22 period was peak intensity:
+
+| Tag | Date | 48h Response Commits |
+|-----|------|---------------------|
+| v0.33.0 | Dec 21 | 413 |
+| v0.33.1 | Dec 21 | 409 |
+| v0.33.2 | Dec 22 | 397 |
+| v0.32.0 | Dec 21 | 308 |
+| v0.31.0 | Dec 21 | 302 |
+
+Seven beads tags were released on Dec 21 alone, triggering a cascade of 300-413 gastown response commits per tag. This was clearly a major integration push.
+
+### 15. Commit Message Quality as Agent Maturity Proxy
+
+**Problem:** If agent commit messages are getting more descriptive over time, it would indicate prompt/tooling refinement. Conversely, if they're becoming formulaic, it suggests the agent prompts are stale.
+
+**Method:** Tracked message length, conventional commit adoption (`feat:`, `fix:`, etc. prefix), detail score (mentions file paths, function names, or reason clauses), vocabulary diversity, and repeated messages. Compared agents vs humans by month.
+
+#### Agents Adopted Conventional Commits Faster Than Humans
+
+| Month | Agent Conv% | Human Conv% |
+|-------|------------|-------------|
+| Oct 2025 | 0.0% | 14.6% |
+| Nov 2025 | 0.0% | 17.7% |
+| Dec 2025 | 42.9% | 40.6% |
+| Jan 2026 | 58.2% | 74.7% |
+| Feb 2026 | **80.7%** | 66.2% |
+| Mar 2026 | 70.6% | 51.1% |
+
+The jump from 0% to 42.9% in December strongly suggests conventional commit tooling or prompt instructions were introduced around that time. By February, agents were more consistent than humans at following the convention.
+
+#### Message Length Is Similar, Both Improving
+
+Agents write slightly longer messages on average (median 62 chars vs 53 for humans). Both improved over time: agents +7.4%, humans +44.4% (humans started very terse).
+
+#### Per-Agent Evolution
+
+| Agent | Dec Med | Jan Med | Feb Med | Mar Med | Conv% Trend |
+|-------|---------|---------|---------|---------|-------------|
+| mayor | 28 | 57 | 64 | 62 | 36% -> 85% -> 73% |
+| beads/crew/emma | 49 | 52 | 61 | **27** | 82% -> 81% -> **43%** |
+| beads/refinery | - | 35 | 68 | 69 | 1% -> 41% -> 26% |
+| furiosa | 69 | 59 | 73 | 68 | 100% -> 97% -> 93% |
+| gastown/crew/max | 51 | 59 | 69 | 70 | 14% -> 100% -> 35% |
+
+`furiosa` is consistently the highest-quality agent for message hygiene: 93-100% conventional adoption throughout, 59-73 char messages. `beads/crew/emma` shows a regression in March (median dropped to 27 chars, conventional to 43%), worth investigating. `mayor` improved dramatically from December (28 chars, 36% conventional) to February (64 chars, 85%).
+
+#### Duplicate Messages Tell Different Stories
+
+Agent duplicates are minimal (max 8 repeats for merge commits). Human duplicates are significant: "bd sync: apply DB changes after import" appears **87 times**, merge commits appear 76 and 45 times. Agents have far better hygiene on duplicate messages.
+
+#### Vocabulary Diversity Inverted Over Time
+
+Agents started with high diversity (3-5 unique words per commit) which dropped to 1.17 in January when agent volume exploded, then recovered to 2.36 by March. Humans show the opposite trend, increasing diversity as individual volume dropped. This suggests agents became more formulaic at scale but are recovering as prompts mature.
+
+---
+
+## Analysis Scripts Reference
+
+All scripts in `/tmp/codecohesion-analysis/`:
+
+| Script | Investigation |
+|--------|--------------|
+| `agent-quality.js` | Per-agent quality metrics (fix:feat, fix-after-feat, reverts, commit size) |
+| `daemon-godobj.js` | daemon.go god-object trajectory with beads comparison |
+| `pruning-analysis.js` | February pruning before/after coupling, decomposition map |
+| `agent-autonomy.js` | Weekend/off-hours activity, supervised vs unsupervised quality |
+| `cascade-timing.js` | Tag-triggered cascade response times and volume |
+| `message-quality.js` | Commit message quality evolution, per-agent trends |
+| `crossrepo.js` | Cross-repo shared authors, daily correlation, cascades (from initial analysis) |
+| `architecture.js` | Architectural evolution, package growth (from initial analysis) |
+| `velocity.js` | Velocity and contribution patterns (from initial analysis) |
