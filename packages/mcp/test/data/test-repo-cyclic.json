@@ -1,0 +1,31 @@
+{
+  "format": "structure-v1",
+  "repositoryPath": "/test/repo",
+  "analyzedAt": "2026-03-08T00:00:00.000Z",
+  "analysis": {
+    "filesAnalyzed": 2,
+    "importEdges": 2,
+    "functionDecls": 2,
+    "parseErrors": 0
+  },
+  "imports": [
+    {
+      "from": "src/P.ts",
+      "to": "src/Q.ts",
+      "toRaw": "./Q",
+      "symbols": ["qFunc"],
+      "isExternal": false
+    },
+    {
+      "from": "src/Q.ts",
+      "to": "src/P.ts",
+      "toRaw": "./P",
+      "symbols": ["pFunc"],
+      "isExternal": false
+    }
+  ],
+  "functions": [
+    { "file": "src/P.ts", "name": "pFunc", "kind": "function", "line": 1, "endLine": 10, "params": [], "isExported": true },
+    { "file": "src/Q.ts", "name": "qFunc", "kind": "function", "line": 1, "endLine": 10, "params": [], "isExported": true }
+  ]
+}

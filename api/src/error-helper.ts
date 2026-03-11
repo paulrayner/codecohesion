@@ -77,7 +77,7 @@ export function createRepoNotFoundError(
 
 export function createInvalidParameterError(
   paramName: string,
-  value: any,
+  value: unknown,
   constraint: string,
   example?: string
 ): ErrorResponse {

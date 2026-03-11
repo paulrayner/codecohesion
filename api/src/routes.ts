@@ -1,16 +1,22 @@
 import { Router, Request, Response } from 'express';
 import { DataLoader } from './data-loader';
 import { QueryService } from './query-service';
+import { ProcessService } from './process-service';
 import {
   createRepoNotFoundError,
   createInvalidParameterError,
   createMissingParameterError
 } from './error-helper';
+import { openApiSpec } from './openapi-spec';
+
+const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure', 'complexity'] as const;
+type ProcessingMode = typeof VALID_PROCESSING_MODES[number];
 
 export function createRoutes(): Router {
   const router = Router();
   const dataLoader = new DataLoader();
   const queryService = new QueryService(dataLoader);
+  const processService = new ProcessService();
 
   /**
    * GET /api/repos
@@ -51,6 +57,37 @@ export function createRoutes(): Router {
               href: `/api/repos/${repo.id}/hotspots{?limit}`,
               templated: true,
               description: 'Get top N high-churn/high-contributor files'
+            },
+            imports: {
+              href: `/api/repos/${repo.id}/imports{?file,external}`,
+              templated: true,
+              description: 'Get import edges with optional file and external filters'
+            },
+            structure: {
+              href: `/api/repos/${repo.id}/structure`,
+              description: 'Get structure metadata and function declarations'
+            },
+            complexity: {
+              href: `/api/repos/${repo.id}/complexity`,
+              description: 'Get complexity analysis data (requires complexity mode run)'
+            },
+            impact: {
+              href: `/api/repos/${repo.id}/impact{/filePath}`,
+              templated: true,
+              description: 'Get transitive impact analysis for a file in the dependency graph'
+            },
+            context: {
+              href: `/api/repos/${repo.id}/context{/filePath}`,
+              templated: true,
+              description: 'Get file context — ownership, imports, functions, and optional coupling'
+            },
+            coupling: {
+              href: `/api/repos/${repo.id}/coupling`,
+              description: 'Get full coupling graph (requires coupling mode run)'
+            },
+            health: {
+              href: `/api/repos/${repo.id}/health`,
+              description: 'Get composite health score for the repository'
             }
           }
         };
@@ -82,6 +119,37 @@ export function createRoutes(): Router {
             href: `/api/repos/${repo.id}/hotspots{?limit}`,
             templated: true,
             description: 'Get top N high-churn/high-contributor files'
+          },
+          imports: {
+            href: `/api/repos/${repo.id}/imports{?file,external}`,
+            templated: true,
+            description: 'Get import edges with optional file and external filters'
+          },
+          structure: {
+            href: `/api/repos/${repo.id}/structure`,
+            description: 'Get structure metadata and function declarations'
+          },
+          complexity: {
+            href: `/api/repos/${repo.id}/complexity`,
+            description: 'Get complexity analysis data (requires complexity mode run)'
+          },
+          impact: {
+            href: `/api/repos/${repo.id}/impact{/filePath}`,
+            templated: true,
+            description: 'Get transitive impact analysis for a file in the dependency graph'
+          },
+          context: {
+            href: `/api/repos/${repo.id}/context{/filePath}`,
+            templated: true,
+            description: 'Get file context — ownership, imports, functions, and optional coupling'
+          },
+          coupling: {
+            href: `/api/repos/${repo.id}/coupling`,
+            description: 'Get full coupling graph (requires coupling mode run)'
+          },
+          health: {
+            href: `/api/repos/${repo.id}/health`,
+            description: 'Get composite health score for the repository'
           }
         }
       }));
@@ -114,9 +182,12 @@ export function createRoutes(): Router {
       res.json(stats);
     } catch (error) {
       console.error('Error getting stats:', error);
-      const allRepos = await dataLoader.listRepos();
-      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
-      res.status(404).json(errorResponse);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -154,9 +225,12 @@ export function createRoutes(): Router {
       res.json(contributors);
     } catch (error) {
       console.error('Error getting contributors:', error);
-      const allRepos = await dataLoader.listRepos();
-      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
-      res.status(404).json(errorResponse);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -247,9 +321,12 @@ export function createRoutes(): Router {
       res.json(files);
     } catch (error) {
       console.error('Error getting files:', error);
-      const allRepos = await dataLoader.listRepos();
-      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
-      res.status(404).json(errorResponse);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -264,7 +341,7 @@ export function createRoutes(): Router {
 
       const limitNum = limit ? parseInt(limit as string, 10) : 20;
 
-      if (limitNum < 1 || limitNum > 100) {
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
         const error = createInvalidParameterError(
           'limit',
           limitNum,
@@ -278,10 +355,433 @@ export function createRoutes(): Router {
       res.json(hotspots);
     } catch (error) {
       console.error('Error getting hotspots:', error);
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        const allRepos = await dataLoader.listRepos();
+        const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+        return res.status(404).json(errorResponse);
+      }
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/imports
+   * Get import edges for a repository with optional ?file= and ?external= filters.
+   * Requires a structure analysis to have been run first (mode 'structure').
+   */
+  router.get('/repos/:repoId/imports', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const { file, external } = req.query;
+
+      // Parse optional ?external= boolean filter
+      let externalFilter: boolean | undefined;
+      if (external !== undefined) {
+        if (external === 'true') {
+          externalFilter = true;
+        } else if (external === 'false') {
+          externalFilter = false;
+        } else {
+          const error = createInvalidParameterError(
+            'external',
+            external,
+            'must be "true" or "false"',
+            `https://codecohesion-api.railway.app/api/repos/${repoId}/imports?external=true`
+          );
+          return res.status(400).json(error);
+        }
+      }
+
+      const imports = await dataLoader.loadImports(
+        repoId,
+        file as string | undefined,
+        externalFilter
+      );
+
+      res.json({
+        repository: { id: repoId },
+        filters: {
+          file: (file as string | undefined) ?? null,
+          external: externalFilter ?? null
+        },
+        imports,
+        total: imports.length,
+        _links: {
+          self: { href: `/api/repos/${repoId}/imports` },
+          structure: {
+            href: `/api/repos/${repoId}/structure`,
+            description: 'Get full structure metadata and function declarations'
+          }
+        }
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Structure data not found')) {
+        return res.status(404).json({
+          error: 'Structure data not found',
+          code: 'NOT_FOUND',
+          message: error.message
+        });
+      }
+      console.error('Error getting imports:', error);
       const allRepos = await dataLoader.listRepos();
       const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
       res.status(404).json(errorResponse);
     }
+  });
+
+  /**
+   * GET /api/repos/:repoId/structure
+   * Get structure metadata and function declarations.
+   * Requires a structure analysis to have been run first (mode 'structure').
+   */
+  router.get('/repos/:repoId/structure', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const structure = await dataLoader.loadStructure(repoId);
+
+      res.json({
+        repository: { id: repoId },
+        analyzedAt: structure.analyzedAt,
+        repositoryPath: structure.repositoryPath,
+        analysis: structure.analysis,
+        functions: structure.functions,
+        _links: {
+          self: { href: `/api/repos/${repoId}/structure` },
+          imports: {
+            href: `/api/repos/${repoId}/imports{?file,external}`,
+            templated: true,
+            description: 'Get import edges with optional file and external filters'
+          }
+        }
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Structure data not found')) {
+        return res.status(404).json({
+          error: 'Structure data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting structure:', error);
+      const allRepos = await dataLoader.listRepos();
+      const errorResponse = createRepoNotFoundError(req.params.repoId, allRepos);
+      res.status(404).json(errorResponse);
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/context/:filePath(*)
+   * Get file context — ownership, imports, functions, and optional coupling.
+   */
+  router.get('/repos/:repoId/context/*', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const filePath = req.params[0];
+
+      const context = await queryService.getContext(repoId, filePath);
+      res.json(context);
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        return res.status(404).json({ error: `Repository 'not found' for id: ${req.params.repoId}` });
+      }
+      console.error('Error getting context:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/impact/:filePath(*)
+   * Get transitive impact analysis for a file in the dependency graph.
+   * Requires a structure analysis to have been run first (mode 'structure').
+   */
+  router.get('/repos/:repoId/impact/*', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      // Express wildcard captures the remainder as req.params[0]
+      const filePath = req.params[0];
+
+      const impact = await queryService.getImpact(repoId, filePath);
+      res.json(impact);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Structure data not found')) {
+        return res.status(404).json({
+          error: 'Structure data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting impact:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/health
+   * Get composite health score for a repository.
+   * Always available when a snapshot exists; complexity/coupling data is optional.
+   */
+  router.get('/repos/:repoId/health', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const health = await queryService.getHealth(repoId);
+      res.json(health);
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      console.error('Error getting health score:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/complexity
+   * Get complexity analysis data for a repository.
+   * Requires a complexity analysis to have been run first (mode 'complexity').
+   */
+  router.get('/repos/:repoId/complexity', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const data = await queryService.getComplexity(repoId);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Complexity data not found')) {
+        return res.status(404).json({
+          error: 'Complexity data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting complexity:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/complexity/hotspots
+   * Get top-N hotspot entries sorted by hotspot score descending.
+   * Requires a complexity analysis to have been run first (mode 'complexity').
+   */
+  router.get('/repos/:repoId/complexity/hotspots', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const { limit } = req.query;
+
+      const limitNum = limit ? parseInt(limit as string, 10) : 20;
+
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        const error = createInvalidParameterError(
+          'limit',
+          limitNum,
+          'must be between 1 and 100',
+          `https://codecohesion-api.railway.app/api/repos/${repoId}/complexity/hotspots?limit=20`
+        );
+        return res.status(400).json(error);
+      }
+
+      const hotspots = await queryService.getComplexityHotspots(repoId, limitNum);
+      res.json(hotspots);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Complexity data not found')) {
+        return res.status(404).json({
+          error: 'Complexity data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message
+        });
+      }
+      console.error('Error getting complexity hotspots:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/coupling
+   * Get full coupling graph (edges, clusters, analysis metadata) for a repository.
+   * Requires a coupling analysis to have been run first (mode 'coupling').
+   */
+  router.get('/repos/:repoId/coupling', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const data = await queryService.getCoupling(repoId);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Coupling data not found')) {
+        return res.status(404).json({
+          error: 'Coupling data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message,
+        });
+      }
+      console.error('Error getting coupling:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /api/repos/:repoId/coupling/:filePath(*)
+   * Get coupling edges for a specific file, sorted by coupling descending.
+   * Requires a coupling analysis to have been run first (mode 'coupling').
+   */
+  router.get('/repos/:repoId/coupling/*', async (req: Request, res: Response) => {
+    try {
+      const { repoId } = req.params;
+      const filePath = req.params[0];
+      const data = await queryService.getCouplingForFile(repoId, filePath);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Coupling data not found')) {
+        return res.status(404).json({
+          error: 'Coupling data not found',
+          code: 'NOT_FOUND',
+          message: (error as Error).message,
+        });
+      }
+      console.error('Error getting coupling for file:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /api/process
+   * Start a processing job for a repository
+   */
+  router.post('/process', async (req: Request, res: Response) => {
+    try {
+      const { repoPath, repoUrl, mode, targetCommits } = req.body as {
+        repoPath?: string;
+        repoUrl?: string;
+        mode?: string;
+        targetCommits?: number;
+      };
+
+      // Either repoPath or repoUrl is required
+      if (!repoPath && !repoUrl) {
+        const error = createMissingParameterError(
+          'repoPath or repoUrl',
+          'string',
+          'Local filesystem path (repoPath) or remote URL (repoUrl) of the repository to process',
+          'https://codecohesion-api.railway.app/api/process'
+        );
+        return res.status(400).json(error);
+      }
+
+      // mode is required and must be a valid value
+      if (!mode) {
+        const error = createMissingParameterError(
+          'mode',
+          'string',
+          `Processing mode: one of ${VALID_PROCESSING_MODES.join(', ')}`,
+          'https://codecohesion-api.railway.app/api/process'
+        );
+        return res.status(400).json(error);
+      }
+
+      if (!VALID_PROCESSING_MODES.includes(mode as ProcessingMode)) {
+        const error = createInvalidParameterError(
+          'mode',
+          mode,
+          `must be one of: ${VALID_PROCESSING_MODES.join(', ')}`,
+          'https://codecohesion-api.railway.app/api/process'
+        );
+        return res.status(400).json(error);
+      }
+
+      const jobId = await processService.startJob({
+        repoPath,
+        repoUrl,
+        mode: mode as ProcessingMode,
+        targetCommits
+      });
+
+      return res.status(202).json({
+        jobId,
+        status: 'pending',
+        _links: {
+          progress: { href: `/api/process/${jobId}/progress` }
+        }
+      });
+    } catch (error) {
+      console.error('Error starting processing job:', error);
+      res.status(500).json({ error: 'Failed to start processing job' });
+    }
+  });
+
+  /**
+   * GET /api/process/:jobId/progress
+   * SSE stream for real-time progress updates on a processing job
+   */
+  router.get('/process/:jobId/progress', (req: Request, res: Response) => {
+    const { jobId } = req.params;
+
+    const emitter = processService.getJobEmitter(jobId);
+    if (!emitter) {
+      return res.status(404).json({
+        error: 'Job not found',
+        code: 'NOT_FOUND',
+        message: `No processing job found with id '${jobId}'`
+      });
+    }
+
+    // Establish SSE connection
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // All events (progress, complete, error) are emitted on the 'progress' channel
+    // by ProcessService. We forward them as SSE messages and close on terminal events.
+    const onProgress = (data: { type?: string }): void => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      // Close connection on terminal events
+      if (data.type === 'complete' || data.type === 'error') {
+        res.end();
+        emitter.off('progress', onProgress);
+      }
+    };
+
+    emitter.on('progress', onProgress);
+
+    // Clean up listener when client disconnects to prevent memory leaks
+    req.on('close', () => {
+      emitter.off('progress', onProgress);
+    });
+  });
+
+  /**
+   * GET /api/docs
+   * Serves the OpenAPI 3.1 JSON specification for this API.
+   */
+  router.get('/docs', (_req: Request, res: Response) => {
+    res.json(openApiSpec);
+  });
+
+  /**
+   * GET /api/docs/ui
+   * Serves a Swagger UI HTML page that loads the spec from /api/docs.
+   * Uses a CDN-hosted Swagger UI bundle — no local dependency required.
+   */
+  router.get('/docs/ui', (_req: Request, res: Response) => {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CodeCohesion API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/api/docs',
+      dom_id: '#swagger-ui',
+    });
+  </script>
+</body>
+</html>`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
   });
 
   return router;

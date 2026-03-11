@@ -1,6 +1,7 @@
 import simpleGit, { SimpleGit, DefaultLogFields, LogResult } from 'simple-git';
 import * as path from 'path';
-import { TimelineData, CommitSnapshot, DrillDownLayer, RepositorySnapshot, DirectoryNode } from './types.js';
+import { TimelineData, CommitSnapshot, DrillDownLayer, RepositorySnapshot } from '@codecohesion/shared-types';
+import { Logger, consoleLogger } from './logger';
 
 interface AdaptiveThresholds {
   filesChanged: {
@@ -62,10 +63,12 @@ export class TimelineAnalyzer {
   private repoPath: string;
   private commits: RawCommitData[] = [];
   private tags: Map<string, string[]> = new Map(); // hash -> tag names
+  private logger: Logger;
 
-  constructor(repoPath: string) {
+  constructor(repoPath: string, logger: Logger = consoleLogger) {
     this.repoPath = path.resolve(repoPath);
     this.git = simpleGit(this.repoPath);
+    this.logger = logger;
   }
 
   /**
@@ -77,7 +80,7 @@ export class TimelineAnalyzer {
     targetCommitCount: number = 200,
     headSnapshot: RepositorySnapshot
   ): Promise<TimelineData> {
-    console.log(`\nGenerating timeline with target ${targetCommitCount} commits...`);
+    this.logger.log(`\nGenerating timeline with target ${targetCommitCount} commits...`);
 
     // Load all commits with stats
     await this.loadHistory();
@@ -125,7 +128,7 @@ export class TimelineAnalyzer {
       }
     };
 
-    console.log(`Timeline generated: ${commits.length} commits selected from ${this.commits.length} total\n`);
+    this.logger.log(`Timeline generated: ${commits.length} commits selected from ${this.commits.length} total\n`);
     return timelineData;
   }
 
@@ -133,9 +136,9 @@ export class TimelineAnalyzer {
    * Generate drill-down layer for specific time range
    */
   async createDrillDownLayer(
-    startDate: string,
-    endDate: string,
-    label: string
+    _startDate: string,
+    _endDate: string,
+    _label: string
   ): Promise<DrillDownLayer> {
     // TODO: Implementation in Phase 4
     throw new Error('Not yet implemented');
@@ -145,14 +148,14 @@ export class TimelineAnalyzer {
    * Load full commit history with stats
    */
   private async loadHistory(): Promise<void> {
-    console.log(`Loading commit history from: ${this.repoPath}`);
+    this.logger.log(`Loading commit history from: ${this.repoPath}`);
 
     // Get all tags first
     await this.loadTags();
 
     // Get all commits
     const log: LogResult<DefaultLogFields> = await this.git.log(['--all']);
-    console.log(`Found ${log.all.length} commits`);
+    this.logger.log(`Found ${log.all.length} commits`);
 
     // Process each commit
     for (let i = 0; i < log.all.length; i++) {
@@ -200,7 +203,7 @@ export class TimelineAnalyzer {
 
       // Progress indicator
       if ((i + 1) % 100 === 0) {
-        console.log(`  Processed ${i + 1}/${log.all.length} commits...`);
+        this.logger.log(`  Processed ${i + 1}/${log.all.length} commits...`);
       }
     }
 
@@ -213,30 +216,48 @@ export class TimelineAnalyzer {
       this.commits[i].daysSincePrevious = daysDiff;
     }
 
-    console.log(`History loaded: ${this.commits.length} commits`);
+    this.logger.log(`History loaded: ${this.commits.length} commits`);
   }
 
   /**
    * Load all tags and map them to commit hashes
    */
   private async loadTags(): Promise<void> {
-    const tagList = await this.git.tags();
+    // Single git call to get all tags with their commit hashes (replaces per-tag git show loop)
+    try {
+      const result = await this.git.raw([
+        'tag', '-l',
+        '--format=%(objectname:short) %(refname:short)'
+      ]);
 
-    for (const tag of tagList.all) {
-      try {
-        const show = await this.git.show([tag, '--format=%H', '--no-patch']);
-        const hash = show.trim().split('\n')[0];
+      const lines = result.trim().split('\n').filter(l => l.trim());
+      let tagCount = 0;
 
-        if (!this.tags.has(hash)) {
-          this.tags.set(hash, []);
+      for (const line of lines) {
+        const spaceIndex = line.indexOf(' ');
+        if (spaceIndex === -1) continue;
+
+        const hash = line.substring(0, spaceIndex).trim();
+        const tagName = line.substring(spaceIndex + 1).trim();
+        if (!hash || !tagName) continue;
+
+        // Resolve short hash to full hash for matching
+        try {
+          const fullHash = (await this.git.raw(['rev-parse', `${hash}^{commit}`])).trim();
+          if (!this.tags.has(fullHash)) {
+            this.tags.set(fullHash, []);
+          }
+          this.tags.get(fullHash)!.push(tagName);
+          tagCount++;
+        } catch {
+          // Tag may point to a non-commit object (e.g., annotated tag blob) — skip
         }
-        this.tags.get(hash)!.push(tag);
-      } catch (error) {
-        // Ignore tags that can't be resolved
       }
-    }
 
-    console.log(`Loaded ${tagList.all.length} tags`);
+      this.logger.log(`Loaded ${tagCount} tags`);
+    } catch (error) {
+      this.logger.warn(`Could not load tags: ${error}`);
+    }
   }
 
   /**
@@ -344,7 +365,7 @@ export class TimelineAnalyzer {
    * Calculate adaptive thresholds based on repository-specific percentiles
    */
   private calculateAdaptiveThresholds(): AdaptiveThresholds {
-    console.log('Calculating adaptive thresholds...');
+    this.logger.log('Calculating adaptive thresholds...');
 
     // Extract all values
     const filesChangedValues = this.commits.map(c => c.totalFilesChanged).sort((a, b) => a - b);
@@ -372,9 +393,9 @@ export class TimelineAnalyzer {
       }
     };
 
-    console.log('Adaptive thresholds:');
-    console.log(`  Files changed - p50: ${thresholds.filesChanged.p50}, p75: ${thresholds.filesChanged.p75}, p90: ${thresholds.filesChanged.p90}, p95: ${thresholds.filesChanged.p95}, p99: ${thresholds.filesChanged.p99}`);
-    console.log(`  Lines changed - p50: ${thresholds.linesChanged.p50}, p75: ${thresholds.linesChanged.p75}, p90: ${thresholds.linesChanged.p90}, p95: ${thresholds.linesChanged.p95}, p99: ${thresholds.linesChanged.p99}`);
+    this.logger.log('Adaptive thresholds:');
+    this.logger.log(`  Files changed - p50: ${thresholds.filesChanged.p50}, p75: ${thresholds.filesChanged.p75}, p90: ${thresholds.filesChanged.p90}, p95: ${thresholds.filesChanged.p95}, p99: ${thresholds.filesChanged.p99}`);
+    this.logger.log(`  Lines changed - p50: ${thresholds.linesChanged.p50}, p75: ${thresholds.linesChanged.p75}, p90: ${thresholds.linesChanged.p90}, p95: ${thresholds.linesChanged.p95}, p99: ${thresholds.linesChanged.p99}`);
 
     return thresholds;
   }
@@ -383,7 +404,7 @@ export class TimelineAnalyzer {
    * Score commits by importance (V2: Adaptive Algorithm)
    */
   private scoreCommits(): ScoredCommit[] {
-    console.log('Scoring commits by importance (V2: Adaptive)...');
+    this.logger.log('Scoring commits by importance (V2: Adaptive)...');
 
     // Calculate adaptive thresholds
     const thresholds = this.calculateAdaptiveThresholds();
@@ -525,7 +546,7 @@ export class TimelineAnalyzer {
     // Re-sort by date
     scored.sort((a, b) => a.timestamp - b.timestamp);
 
-    console.log(`Scoring complete. Highest score: ${highestScore}`);
+    this.logger.log(`Scoring complete. Highest score: ${highestScore}`);
     return scored;
   }
 
@@ -533,7 +554,7 @@ export class TimelineAnalyzer {
    * Select commits with temporal spread (V2: Priority Milestones First)
    */
   private selectCommits(scored: ScoredCommit[], targetCount: number): ScoredCommit[] {
-    console.log(`Selecting ${targetCount} commits...`);
+    this.logger.log(`Selecting ${targetCount} commits...`);
 
     // Reset selection
     scored.forEach(c => c.selected = false);
@@ -549,11 +570,11 @@ export class TimelineAnalyzer {
       selected.push(milestone);
     }
 
-    console.log(`  Phase 1: Selected ${selected.length} critical milestones (tags + first/last)`);
+    this.logger.log(`  Phase 1: Selected ${selected.length} critical milestones (tags + first/last)`);
 
     // If we've already exceeded target, just return the milestones
     if (selected.length >= targetCount) {
-      console.log(`  Milestone count (${selected.length}) >= target (${targetCount}), returning milestones only`);
+      this.logger.log(`  Milestone count (${selected.length}) >= target (${targetCount}), returning milestones only`);
       return selected.sort((a, b) => a.timestamp - b.timestamp);
     }
 
@@ -597,7 +618,7 @@ export class TimelineAnalyzer {
       bucketSelected++;
     }
 
-    console.log(`  Phase 2: Selected ${bucketSelected} commits from temporal buckets`);
+    this.logger.log(`  Phase 2: Selected ${bucketSelected} commits from temporal buckets`);
 
     // Fill any remaining slots with highest global scores
     if (selected.length < targetCount) {
@@ -612,13 +633,13 @@ export class TimelineAnalyzer {
         globalSelected++;
       }
 
-      console.log(`  Phase 3: Selected ${globalSelected} commits from global high scores`);
+      this.logger.log(`  Phase 3: Selected ${globalSelected} commits from global high scores`);
     }
 
     // Sort by date
     selected.sort((a, b) => a.timestamp - b.timestamp);
 
-    console.log(`  Total selected: ${selected.length} commits`);
+    this.logger.log(`  Total selected: ${selected.length} commits`);
     return selected;
   }
 }

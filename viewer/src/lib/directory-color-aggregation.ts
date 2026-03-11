@@ -1,6 +1,5 @@
 import { DirectoryNode, FileNode, TreeNode } from '../types';
 import { ColorMode, getColorForFile } from '../colorModeManager';
-import { getColorForExtension } from '../colorScheme';
 
 /**
  * Calculate the dominant color for a directory based on file count

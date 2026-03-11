@@ -1,36 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calculateDirectoryStats, calculateMaxDepth, countDirectories, collectModificationDates } from './tree-stats';
-import { DirectoryNode, FileNode, TreeNode } from '../types';
-
-// Helper function to create mock file nodes
-function createMockFile(overrides: Partial<FileNode> = {}): FileNode {
-  return {
-    path: overrides.path || '/test.ts',
-    name: overrides.name || 'test.ts',
-    type: 'file',
-    loc: overrides.loc ?? 100,
-    extension: overrides.extension || 'ts',
-    lastModified: overrides.lastModified || null,
-    lastAuthor: overrides.lastAuthor || null,
-    lastCommitHash: overrides.lastCommitHash || null,
-    commitCount: overrides.commitCount || null,
-    contributorCount: overrides.contributorCount || null,
-    firstCommitDate: overrides.firstCommitDate || null,
-    recentLinesChanged: overrides.recentLinesChanged || null,
-    avgLinesPerCommit: overrides.avgLinesPerCommit || null,
-    daysSinceLastModified: overrides.daysSinceLastModified || null,
-  };
-}
-
-// Helper function to create mock directory nodes
-function createMockDir(name: string, children: TreeNode[] = []): DirectoryNode {
-  return {
-    path: `/${name}`,
-    name,
-    type: 'directory',
-    children,
-  };
-}
+import { createMockFile, createMockDir } from './test-fixtures';
 
 describe('calculateDirectoryStats', () => {
   it('should count files by extension', () => {

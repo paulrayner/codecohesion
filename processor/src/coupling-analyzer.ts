@@ -10,12 +10,15 @@
  * - DDD-VISION.md Level 1: File Co-Change Analysis
  */
 
-import { TimelineDataV2, CommitSnapshot } from './types';
+import { TimelineDataV2, CommitSnapshot } from '@codecohesion/shared-types';
 import { CouplingGraph, CouplingEdge, Cluster } from './coupling-types';
 import Graph from 'graphology';
 import louvain from 'graphology-communities-louvain';
+import { Logger, consoleLogger } from './logger';
 
 export class CouplingAnalyzer {
+  private logger: Logger;
+
   // Configuration parameters
   private readonly MIN_COUPLING_THRESHOLD = 0.1;  // Ignore weak coupling (< 10%)
   private readonly MIN_CLUSTER_SIZE = 2;          // Ignore single-file clusters
@@ -26,17 +29,21 @@ export class CouplingAnalyzer {
   private coChangeMatrix: Map<string, Map<string, number>> = new Map();
   private fileChangeCounts: Map<string, number> = new Map();
 
+  constructor(logger: Logger = consoleLogger) {
+    this.logger = logger;
+  }
+
   /**
    * Analyze temporal coupling from Timeline V2 data
    */
   analyze(timeline: TimelineDataV2, timelineFilePath: string): CouplingGraph {
-    console.log(`\n🔍 Analyzing temporal coupling...`);
-    console.log(`   Repository: ${timeline.repositoryPath}`);
-    console.log(`   Commits: ${timeline.commits.length}`);
+    this.logger.log(`\n🔍 Analyzing temporal coupling...`);
+    this.logger.log(`   Repository: ${timeline.repositoryPath}`);
+    this.logger.log(`   Commits: ${timeline.commits.length}`);
 
     // Validate input format
     if (timeline.format !== 'timeline-v2') {
-      throw new Error(`Invalid format: ${(timeline as any).format}. Expected 'timeline-v2'`);
+      throw new Error(`Invalid format: ${timeline.format}. Expected 'timeline-v2'`);
     }
 
     // Step 1: Build co-change matrix from commit history
@@ -44,15 +51,15 @@ export class CouplingAnalyzer {
 
     // Step 2: Calculate coupling scores (Jaccard similarity)
     const edges = this.calculateCouplingScores();
-    console.log(`   Coupling edges: ${edges.length} (after filtering)`);
+    this.logger.log(`   Coupling edges: ${edges.length} (after filtering)`);
 
     // Step 3: Build graph for clustering
     const graph = this.buildGraph(edges);
-    console.log(`   Graph nodes: ${graph.order}, edges: ${graph.size}`);
+    this.logger.log(`   Graph nodes: ${graph.order}, edges: ${graph.size}`);
 
     // Step 4: Run Louvain clustering
     const clusters = this.clusterFiles(graph);
-    console.log(`   Clusters detected: ${clusters.length}`);
+    this.logger.log(`   Clusters detected: ${clusters.length}`);
 
     // Return complete coupling graph
     return {
@@ -74,7 +81,7 @@ export class CouplingAnalyzer {
    * Build co-change matrix by analyzing all commits
    */
   private buildCoChangeMatrix(commits: CommitSnapshot[]): void {
-    console.log(`   Building co-change matrix...`);
+    this.logger.log(`   Building co-change matrix...`);
 
     for (const commit of commits) {
       // Get all changed files (modified + added, exclude deleted)
@@ -110,15 +117,15 @@ export class CouplingAnalyzer {
       }
     }
 
-    console.log(`   Files tracked: ${this.fileChangeCounts.size}`);
-    console.log(`   Raw co-change pairs: ${this.getTotalCoChangePairs()}`);
+    this.logger.log(`   Files tracked: ${this.fileChangeCounts.size}`);
+    this.logger.log(`   Raw co-change pairs: ${this.getTotalCoChangePairs()}`);
   }
 
   /**
    * Calculate coupling scores using Jaccard similarity
    */
   private calculateCouplingScores(): CouplingEdge[] {
-    console.log(`   Calculating coupling scores...`);
+    this.logger.log(`   Calculating coupling scores...`);
     const edges: CouplingEdge[] = [];
 
     for (const [fileA, fileAEdges] of this.coChangeMatrix) {
@@ -147,7 +154,7 @@ export class CouplingAnalyzer {
     edges.sort((a, b) => b.coupling - a.coupling);
 
     if (edges.length > this.MAX_EDGES_OUTPUT) {
-      console.log(`   ⚠️  Limiting edges to top ${this.MAX_EDGES_OUTPUT} (from ${edges.length})`);
+      this.logger.log(`   ⚠️  Limiting edges to top ${this.MAX_EDGES_OUTPUT} (from ${edges.length})`);
       return edges.slice(0, this.MAX_EDGES_OUTPUT);
     }
 
@@ -158,7 +165,7 @@ export class CouplingAnalyzer {
    * Build weighted graph from coupling edges
    */
   private buildGraph(edges: CouplingEdge[]): Graph {
-    console.log(`   Building weighted graph...`);
+    this.logger.log(`   Building weighted graph...`);
     const graph = new Graph({ type: 'undirected' });
 
     // Add all files as nodes
@@ -181,7 +188,7 @@ export class CouplingAnalyzer {
    * Cluster files using Louvain community detection
    */
   private clusterFiles(graph: Graph): Cluster[] {
-    console.log(`   Running Louvain clustering...`);
+    this.logger.log(`   Running Louvain clustering...`);
 
     // Run Louvain algorithm
     const clusterAssignments = louvain(graph, {
@@ -201,7 +208,7 @@ export class CouplingAnalyzer {
     const clusters: Cluster[] = [];
     let clusterNumber = 1;
 
-    for (const [clusterId, files] of clustersMap) {
+    for (const [_clusterId, files] of clustersMap) {
       // Filter out very small clusters
       if (files.length < this.MIN_CLUSTER_SIZE) {
         continue;
@@ -242,7 +249,7 @@ export class CouplingAnalyzer {
 
         if (graph.hasEdge(fileA, fileB)) {
           const attrs = graph.getEdgeAttributes(fileA, fileB);
-          totalCoupling += (attrs as any).weight || 0;
+          totalCoupling += (attrs.weight as number) || 0;
           edgeCount++;
         }
       }

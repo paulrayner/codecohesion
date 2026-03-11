@@ -1,0 +1,25 @@
+{
+  "name": "@codecohesion/cli",
+  "version": "0.1.0",
+  "description": "Unified CLI for CodeCohesion repository analysis",
+  "main": "dist/index.js",
+  "bin": {
+    "codecohesion": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@codecohesion/shared-types": "*",
+    "codecohesion-processor": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
+  }
+}

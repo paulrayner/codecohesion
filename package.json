@@ -1,0 +1,32 @@
+{
+  "name": "codecohesion",
+  "private": true,
+  "description": "Root workspace for CodeCohesion monorepo",
+  "workspaces": [
+    "processor",
+    "viewer",
+    "api",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "dev": "turbo run dev --parallel",
+    "test:e2e": "cucumber-js --config e2e/cucumber.mjs",
+    "test:e2e-cli": "cucumber-js --config e2e/cucumber.mjs --tags @cli",
+    "test:e2e-api": "cucumber-js --config e2e/cucumber.mjs --tags @api"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^12.7.0",
+    "@types/node": "^20.10.4",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "turbo": "^2.4.4",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "npm@11.11.0",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.9.0] - 2026-03-08
+
+### Monorepo Migration
+- Migrated to npm workspaces + Turborepo monorepo with unified `npm install`, `npm test`, `npm run dev`, and `npm run lint` from root
+- Added `packages/shared-types/` as single source of truth for shared TypeScript interfaces (`FileNode`, `TreeNode`, `RepositorySnapshot`, etc.)
+- Added `packages/cli/` for unified `codecohesion` CLI entry point (`analyze`, `view`, `serve` commands)
+- Root `turbo.json` orchestrates build, test, lint, and dev tasks across all packages
+- Removed per-package `package-lock.json` files in favor of root-level lock file
+
+### API: In-App Repository Processing
+- Added `POST /api/process` endpoint that runs the processor as a library (no CLI shelling)
+- Added `GET /api/process/:jobId/progress` SSE endpoint for real-time progress streaming
+- `ProcessService` supports all analysis modes: `head`, `timeline-v1`, `timeline-v2`, `coupling`
+- Supports both local paths and remote GitHub URLs (auto-clones to temp directory)
+- Writes output directly to `viewer/public/data/` and updates `repos.json` — no manual file copying
+- Added `LRUCache` for API response caching
+
+### Viewer: Analyze Panel & Extracted Modules
+- Built-in **Analyze** panel in the viewer UI for triggering processing with real-time progress bar
+- Auto-loads visualization when analysis completes
+- Extracted `process-client.ts` (API request building, SSE parsing, form validation)
+- Extracted `generated-files.ts` (generated file detection patterns)
+- Extracted `github-links.ts` (GitHub URL construction)
+- Extracted `webgl-error.ts` (WebGL availability detection with browser-specific instructions)
+- Extracted `configurable-visualizer.ts` and `visualizer-adapter.ts`
+- Added `test-fixtures.ts` for shared test data
+- Added Vite plugin for automatic repository discovery (`vite-plugin-repo-discovery.ts`)
+- Architecture fitness tests enforcing lib file size, import boundaries, and Three.js isolation
+
+### Processor: Library Mode & Refactoring
+- Processor is now importable as a library (`codecohesion-processor`) with `RepositoryAnalyzer`, `TimelineAnalyzer`, `FullDeltaAnalyzer`, `CouplingAnalyzer`
+- All analyzers accept an optional `Logger` parameter; `silentLogger` for library use
+- Extracted `file-reader.ts`, `logger.ts`, `timeline-report-generator.ts`, `timeline-sampler-types.ts`
+- Added `index.ts` barrel export for clean library API
+- Added architecture and type tests
+
+### Quality & Tooling
+- Added ESLint configs (`eslint.config.js`) for api, processor, and viewer packages
+- Added Vitest configs for processor
+- Added e2e test infrastructure with Cucumber.js
+- Added `docs/decisions/` for Architecture Decision Records
+
 ## [0.8.0] - 2025-11-04
 
 - Modern UI redesign with cleaner visual hierarchy and improved spacing

@@ -496,19 +496,16 @@ All error responses follow this structure:
 | `404` | Not Found | Repository or resource not found |
 | `500` | Internal Server Error | File read failure, JSON parse error, unexpected exception |
 
-**Future:**
-- `429 Too Many Requests` - Rate limiting (Phase 2)
-- `401 Unauthorized` - API key required (Phase 3)
-- `403 Forbidden` - API key invalid or expired (Phase 3)
+| `202` | Accepted | Processing job started (POST /api/process) |
 
 ---
 
 ## CORS Configuration
 
 **Allowed Origins:**
-- `https://thepaulrayner.com` (Production viewer)
+- `https://codecohesion.virtualgenius.com` (Production viewer)
 - `http://localhost:3000` (Local viewer)
-- `http://localhost:3001` (Local viewer alternate)
+- `http://localhost:3001` (Local API)
 - `http://localhost:3002` (Local viewer alternate)
 
 **Allowed Methods:** `GET`, `POST`, `OPTIONS`
@@ -554,22 +551,15 @@ daysAgo.setDate(daysAgo.getDate() - parseInt(days));
 sinceDate = daysAgo.toISOString().split('T')[0]; // "2024-10-01"
 ```
 
-### Pagination (Future)
-**Not implemented in Phase 1**, but reserved parameters:
+### Pagination
+Not yet implemented. Reserved parameters for future use:
 
 ```bash
 ?limit=50      # Number of results per page
 ?offset=100    # Skip first N results
-?page=3        # Page number (alternative to offset)
 ```
 
-### Sorting (Future)
-**Not implemented in Phase 1**, but reserved parameters:
-
-```bash
-?sort=churn          # Sort by field
-?order=desc          # Sort order (asc/desc)
-```
+**Note:** The `limit` parameter is already supported on `/hotspots` and `/complexity/hotspots` endpoints (range: 1-100). General pagination for file listings is planned.
 
 ---
 
@@ -582,12 +572,6 @@ Content-Type: application/json
 Access-Control-Allow-Origin: <origin>
 Access-Control-Allow-Credentials: true
 ```
-
-**Future headers:**
-- `X-RateLimit-Limit: 100` - Requests allowed per window
-- `X-RateLimit-Remaining: 87` - Requests remaining
-- `X-RateLimit-Reset: 1698766800` - Unix timestamp of reset
-- `X-Response-Time: 142ms` - Server processing time
 
 ---
 
@@ -773,7 +757,202 @@ app.command('/codecohesion-hotspots', async ({ command, ack, say }) => {
 
 ---
 
-## Future Enhancements (Not in Phase 1)
+---
+
+### 9. Get Imports
+
+**Purpose:** Get import edges for a repository with optional filtering.
+
+```
+GET /api/repos/:repoId/imports
+```
+
+**Query Parameters:**
+- `file` (optional) - Filter imports involving a specific file path
+- `external` (optional) - `true` to show only external imports, `false` for internal only
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Repository or structure data not found
+
+---
+
+### 10. Get Structure
+
+**Purpose:** Get structure metadata and function declarations.
+
+```
+GET /api/repos/:repoId/structure
+```
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Structure data not found
+
+---
+
+### 11. Get Complexity
+
+**Purpose:** Get per-file cyclomatic and cognitive complexity metrics.
+
+```
+GET /api/repos/:repoId/complexity
+```
+
+**Status Codes:**
+- `200 OK` - Success (file list with complexity metrics)
+- `404 Not Found` - Complexity data not found
+
+---
+
+### 12. Get Complexity Hotspots
+
+**Purpose:** Get top-N files ranked by hotspot score (complexity x churn).
+
+```
+GET /api/repos/:repoId/complexity/hotspots
+```
+
+**Query Parameters:**
+- `limit` (optional) - Number of results (default: 20, range: 1-100)
+
+**Status Codes:**
+- `200 OK` - Success
+- `400 Bad Request` - Invalid limit value
+- `404 Not Found` - Complexity data not found
+
+---
+
+### 13. Get Impact
+
+**Purpose:** Get blast radius for a file — direct and transitive dependents.
+
+```
+GET /api/repos/:repoId/impact/:filePath(*)
+```
+
+**Notes:**
+- Uses Express wildcard param to capture nested file paths (e.g., `src/lib/utils.ts`)
+- Returns `directDependents`, `transitiveDependents`, and `blastRadius` count
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Structure data not found
+
+---
+
+### 14. Get Context
+
+**Purpose:** Get aggregated file context — ownership, imports, functions, and coupling.
+
+```
+GET /api/repos/:repoId/context/:filePath(*)
+```
+
+**Notes:**
+- Aggregates data from snapshot (ownership), structure (imports/functions), and coupling (optional)
+- Coupling section is included when coupling data exists, omitted (not error) when it doesn't
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Repository not found
+
+---
+
+### 15. Get Coupling
+
+**Purpose:** Get temporal coupling graph with community clusters.
+
+```
+GET /api/repos/:repoId/coupling
+```
+
+**Notes:**
+- Returns edges (co-change pairs) and clusters (community detection results)
+- Includes analysis metadata
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Coupling data not found (message directs user to run coupling analysis)
+
+---
+
+### 16. Get Coupling for File
+
+**Purpose:** Get coupling edges involving a specific file.
+
+```
+GET /api/repos/:repoId/coupling/:filePath(*)
+```
+
+**Notes:**
+- Returns only edges where the specified file is `fileA` or `fileB`
+- Edges sorted by coupling strength descending
+- Returns empty edges array (not error) for files with no coupling relationships
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Coupling data not found
+
+---
+
+### 17. Get Health Score
+
+**Purpose:** Get composite repository health score (0-100).
+
+```
+GET /api/repos/:repoId/health
+```
+
+**Notes:**
+- Composite score from weighted metrics:
+  - Churn concentration (30%) — Gini coefficient of commit counts
+  - Contributor distribution (20%) — bus factor
+  - Complexity hotspot density (30%) — fraction of high-score files (skipped if no data)
+  - Coupling density (20%) — strong coupling ratio (skipped if no data)
+- When optional data is missing, weights redistribute proportionally
+- Includes per-metric breakdown and actionable recommendations
+
+**Status Codes:**
+- `200 OK` - Success
+- `404 Not Found` - Repository not found
+
+---
+
+### 18. Process Repository
+
+**Purpose:** Trigger on-demand repository analysis.
+
+```
+POST /api/process
+```
+
+**Body:**
+```json
+{
+  "url": "https://github.com/facebook/react",
+  "mode": "head"
+}
+```
+
+**Processing Modes:** `head`, `timeline-v1`, `timeline-v2`, `coupling`, `structure`, `complexity`
+
+**Status Codes:**
+- `202 Accepted` - Job started
+- `400 Bad Request` - Invalid mode or missing parameters
+
+---
+
+### 19. OpenAPI Documentation
+
+```
+GET /api/docs       → OpenAPI 3.1 JSON specification
+GET /api/docs/ui    → Swagger UI (interactive documentation)
+```
+
+---
+
+## Future Enhancements
 
 ### Additional Endpoints
 
@@ -781,13 +960,6 @@ app.command('/codecohesion-hotspots', async ({ command, ack, say }) => {
 ```
 GET /api/repos/:repoId/timeline
 GET /api/repos/:repoId/commits/:hash
-GET /api/repos/:repoId/tags
-```
-
-**Coupling Analysis:**
-```
-GET /api/repos/:repoId/coupling?file=<path>
-GET /api/repos/:repoId/clusters
 ```
 
 **Comparison:**
@@ -795,49 +967,12 @@ GET /api/repos/:repoId/clusters
 GET /api/repos/:repoId/compare?from=<commit>&to=<commit>
 ```
 
-**Search:**
-```
-GET /api/repos/:repoId/search?q=<query>
-# Example: q=commitCount>50 AND contributorCount>5
-```
-
-**Webhooks:**
-```
-POST /api/webhooks
-DELETE /api/webhooks/:id
-```
-
-**Analysis Trigger:**
-```
-POST /api/analyze
-GET /api/jobs/:jobId
-```
-
 ### Query Enhancements
 
-**Aggregations:**
-```
-GET /api/repos/:repoId/files/aggregate?metric=churn&buckets=10
-# Returns histogram of churn distribution
-```
-
-**Filtering:**
-```
-GET /api/repos/:repoId/files?commitCount.gt=50&contributorCount.gt=5
-# SQL-like operators: gt, lt, gte, lte, eq, ne
-```
-
-**Field Selection:**
-```
-GET /api/repos/:repoId/files?fields=path,loc,commitCount
-# Return only specified fields (reduce payload size)
-```
-
-**Pagination:**
-```
-GET /api/repos/:repoId/files?limit=50&offset=100
-# Or: ?limit=50&page=3
-```
+- Search DSL (`?query=churn>10 AND contributors>3`)
+- Field selection (`?fields=path,loc,commitCount`)
+- Pagination (`?limit=50&offset=100`)
+- Aggregations and histograms
 
 ---
 
@@ -845,7 +980,7 @@ GET /api/repos/:repoId/files?limit=50&offset=100
 
 The CodeCohesion API provides:
 
-**8 Core Endpoints:**
+**19 Endpoints:**
 1. Root (`/`)
 2. List repos (`/api/repos`)
 3. Find by URL (`/api/repos?url=...`)
@@ -854,20 +989,36 @@ The CodeCohesion API provides:
 6. Get contributors by URL (`/api/contributors?url=...&days=...`)
 7. Get files (`/api/repos/:id/files`)
 8. Get hotspots (`/api/repos/:id/hotspots`)
+9. Get imports (`/api/repos/:id/imports`)
+10. Get structure (`/api/repos/:id/structure`)
+11. Get complexity (`/api/repos/:id/complexity`)
+12. Get complexity hotspots (`/api/repos/:id/complexity/hotspots`)
+13. Get impact (`/api/repos/:id/impact/:filePath`)
+14. Get context (`/api/repos/:id/context/:filePath`)
+15. Get coupling (`/api/repos/:id/coupling`)
+16. Get coupling for file (`/api/repos/:id/coupling/:filePath`)
+17. Get health score (`/api/repos/:id/health`)
+18. Process repository (`POST /api/process`)
+19. OpenAPI docs (`/api/docs`, `/api/docs/ui`)
 
 **Key Features:**
 - URL-based repository lookup (no ID memorization)
 - Date range filtering (last N days or specific dates)
 - Metric-based sorting (churn, contributors, LOC)
-- Consistent JSON responses
-- Standard HTTP status codes
+- Complexity and coupling analysis endpoints
+- Impact analysis with blast radius calculation
+- Composite health scoring with graceful degradation
+- OpenAPI 3.1 spec with interactive Swagger UI
+- HATEOAS links for API navigation
+- On-demand processing with SSE progress streaming
+- Consistent JSON responses with standard HTTP status codes
 - CORS support for browser-based clients
 
 **Design Principles:**
 - Simple, predictable endpoints
 - Flexible querying without complexity
-- Graceful error handling
+- Graceful error handling and degradation
 - Support for both static and timeline formats
-- No breaking changes between phases
+- Self-documenting via OpenAPI spec
 
-This specification provides the foundation for building integrations, dashboards, and automation tools on top of CodeCohesion analysis data.
+The API is served by the OpenAPI spec at `/api/docs` — use that as the authoritative reference for request/response schemas.

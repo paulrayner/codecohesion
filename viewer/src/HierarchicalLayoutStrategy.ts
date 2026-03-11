@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DirectoryNode, TreeNode } from './types';
+import { DirectoryNode } from './types';
 import { ILayoutStrategy, LayoutNode, CameraDefaults } from './ILayoutStrategy';
 
 /**
@@ -47,7 +47,7 @@ export class HierarchicalLayoutStrategy implements ILayoutStrategy {
    * Solar system metaphor: directories are planets, files orbit in rings around them
    * Each directory uses full 360° circle for its children (no angular subdivision)
    */
-  layoutTree(node: DirectoryNode, position: THREE.Vector3, level: number, angleStart: number, angleEnd: number, parentLayout?: LayoutNode): LayoutNode[] {
+  layoutTree(node: DirectoryNode, position: THREE.Vector3, level: number, _angleStart: number, _angleEnd: number, parentLayout?: LayoutNode): LayoutNode[] {
     const nodes: LayoutNode[] = [];
 
     const currentLayout: LayoutNode = { node, position, parent: parentLayout };

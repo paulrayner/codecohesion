@@ -493,38 +493,24 @@ curl https://api.github.com/
 
 ---
 
-## Implementation Checklist
+## Implementation Status
 
-### Phase 1: Quick Wins (< 1 hour)
-- [ ] Enhance `GET /` root endpoint with:
-  - [ ] Links to main entry points
-  - [ ] Usage examples for common workflows
-  - [ ] List of API capabilities
-  - [ ] Link to documentation
-- [ ] Add `_links` to resource responses:
-  - [ ] Repository list response
-  - [ ] Repository detail response
-- [ ] Improve error messages:
-  - [ ] Add error codes
-  - [ ] Include suggestions for next steps
-  - [ ] Add example requests
-  - [ ] Link to relevant docs
+### Phase 1: Quick Wins — Done
+- [x] HATEOAS `_links` on all repository listing responses (stats, contributors, files, hotspots, imports, structure, complexity, impact, context, coupling, health)
+- [x] Improved error messages with descriptive text (404 vs 500 distinction)
+- [x] Path traversal protection with security tests
 
-### Phase 2: OpenAPI Documentation (2-4 hours)
-- [ ] Create `openapi.json` specification:
-  - [ ] Document all endpoints
-  - [ ] Include request/response schemas
-  - [ ] Add parameter descriptions and constraints
-  - [ ] Provide examples for all endpoints
-- [ ] Install `swagger-ui-express`
-- [ ] Serve Swagger UI at `/api/docs`
-- [ ] Add link to spec from root endpoint
+### Phase 2: OpenAPI Documentation — Done
+- [x] OpenAPI 3.1 spec at `GET /api/docs` covering all 19 endpoints
+- [x] Swagger UI at `GET /api/docs/ui` (CDN-loaded, no dependency)
+- [x] Parameter descriptions and response schemas
 
-### Phase 3: Polish (optional)
+### Phase 3: Polish (remaining)
 - [ ] Add `_query` metadata to responses
 - [ ] Implement `OPTIONS` method support
 - [ ] Add `_actions` for common workflows
 - [ ] Add fuzzy matching for repo lookup errors
+- [ ] Enhance root endpoint with links, examples, and capabilities list
 
 ---
 

@@ -7,15 +7,13 @@ import { ColorMode, getColorForFile } from './colorModeManager';
  */
 export class FilterManager {
   private activeCategories: Set<string> = new Set();
-  private currentMode: ColorMode = 'fileType';
 
   /**
    * Set which legend categories are currently active (visible)
    * @param categories - Array of category names (e.g., ["High churn", "Very high churn"])
    */
-  setActiveCategories(categories: string[], mode: ColorMode): void {
+  setActiveCategories(categories: string[], _mode: ColorMode): void {
     this.activeCategories = new Set(categories);
-    this.currentMode = mode;
   }
 
   /**

@@ -10,7 +10,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { TimelineDataV2 } from './types';
+import { TimelineDataV2 } from '@codecohesion/shared-types';
 import { CouplingAnalyzer } from './coupling-analyzer';
 
 async function main() {
@@ -50,7 +50,7 @@ async function main() {
 
     // Validate format
     if (timeline.format !== 'timeline-v2') {
-      console.error(`❌ Error: Invalid format '${(timeline as any).format}'`);
+      console.error(`❌ Error: Invalid format '${timeline.format}'`);
       console.error(`   Expected: 'timeline-v2'`);
       console.error('');
       console.error('   This tool requires Timeline V2 files (*-timeline-full.json)');

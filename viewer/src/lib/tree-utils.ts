@@ -1,4 +1,4 @@
-import { TreeNode } from '../types';
+import { TreeNode, FileNode } from '../types';
 
 /**
  * Find a file in the tree by its path
@@ -6,8 +6,8 @@ import { TreeNode } from '../types';
  * @param targetPath - The path to search for
  * @returns The file node if found, null otherwise
  */
-export function findFileInTree(tree: any, targetPath: string): any | null {
-  const traverse = (node: any): any | null => {
+export function findFileInTree(tree: TreeNode, targetPath: string): FileNode | null {
+  const traverse = (node: TreeNode): FileNode | null => {
     if (node.type === 'file') {
       if (node.path === targetPath) {
         return node;

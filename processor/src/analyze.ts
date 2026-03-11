@@ -1,24 +1,115 @@
-#!/usr/bin/env node
-
-import * as fs from 'fs';
 import * as path from 'path';
 import simpleGit, { SimpleGit } from 'simple-git';
-import { DirectoryNode, FileNode, RepositorySnapshot, TreeNode, TimelineData } from './types';
-import { TimelineAnalyzer } from './timeline-analyzer';
-import { FullDeltaAnalyzer } from './full-delta-analyzer';
+import { DirectoryNode, FileNode, RepositorySnapshot } from '@codecohesion/shared-types';
+import { Logger, consoleLogger } from './logger';
+import { FileReader, nodeFileReader } from './file-reader';
 
 interface FileInfo {
   path: string;
   content: string;
 }
 
+// ---------------------------------------------------------------------------
+// Pure standalone helpers — no git, no filesystem dependencies
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a file extension from a filename, returning "no-extension" when none
+ * is present.
+ */
+function getExtension(filePath: string): string {
+  const ext = path.extname(filePath);
+  return ext.length > 0 ? ext.substring(1) : 'no-extension';
+}
+
+/**
+ * Build a hierarchical DirectoryNode tree from a flat list of enriched file
+ * records. This is a pure function with no I/O side-effects, making it
+ * straightforward to unit-test in isolation.
+ */
+export function buildTree(files: Array<{
+  path: string;
+  loc: number;
+  lastModified: string | null;
+  lastAuthor: string | null;
+  lastCommitHash: string | null;
+  commitCount: number | null;
+  contributorCount: number | null;
+  firstCommitDate: string | null;
+  recentLinesChanged: number | null;
+  avgLinesPerCommit: number | null;
+  daysSinceLastModified: number | null;
+  isGenerated?: boolean;
+}>): DirectoryNode {
+  const root: DirectoryNode = {
+    path: '',
+    name: 'root',
+    type: 'directory',
+    children: [],
+  };
+
+  for (const file of files) {
+    const parts = file.path.split('/');
+    let currentNode = root;
+
+    // Navigate/create intermediate directory nodes
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dirName = parts[i];
+      const dirPath = parts.slice(0, i + 1).join('/');
+
+      let dirNode = currentNode.children.find(
+        (child) => child.type === 'directory' && child.name === dirName,
+      ) as DirectoryNode | undefined;
+
+      if (!dirNode) {
+        dirNode = {
+          path: dirPath,
+          name: dirName,
+          type: 'directory',
+          children: [],
+        };
+        currentNode.children.push(dirNode);
+      }
+
+      currentNode = dirNode;
+    }
+
+    // Add leaf FileNode
+    const fileName = parts[parts.length - 1];
+    const fileNode: FileNode = {
+      path: file.path,
+      name: fileName,
+      type: 'file',
+      loc: file.loc,
+      extension: getExtension(fileName),
+      lastModified: file.lastModified,
+      lastAuthor: file.lastAuthor,
+      lastCommitHash: file.lastCommitHash,
+      commitCount: file.commitCount,
+      contributorCount: file.contributorCount,
+      firstCommitDate: file.firstCommitDate,
+      recentLinesChanged: file.recentLinesChanged,
+      avgLinesPerCommit: file.avgLinesPerCommit,
+      daysSinceLastModified: file.daysSinceLastModified,
+      isGenerated: file.isGenerated,
+    };
+    currentNode.children.push(fileNode);
+  }
+
+  return root;
+}
+
 class RepositoryAnalyzer {
   private git: SimpleGit;
   private repoPath: string;
+  private logger: Logger;
+  private fileReader: FileReader;
 
-  constructor(repoPath: string) {
+  constructor(repoPath: string, logger: Logger = consoleLogger, fileReader: FileReader = nodeFileReader) {
     this.repoPath = path.resolve(repoPath);
     this.git = simpleGit(this.repoPath);
+    this.logger = logger;
+    this.fileReader = fileReader;
   }
 
   /**
@@ -173,7 +264,7 @@ class RepositoryAnalyzer {
         };
       }
     } catch (error) {
-      console.log(`Could not get git history for ${filePath}`);
+      this.logger.warn(`Could not get git history for ${filePath}`);
     }
     return {
       lastModified: null,
@@ -203,16 +294,16 @@ class RepositoryAnalyzer {
         const fullPath = path.join(this.repoPath, filePath);
 
         // Skip binary files and very large files
-        const stats = fs.statSync(fullPath);
+        const stats = this.fileReader.stat(fullPath);
         if (stats.size > 1024 * 1024) { // Skip files > 1MB
-          console.log(`Skipping large file: ${filePath}`);
+          this.logger.log(`Skipping large file: ${filePath}`);
           continue;
         }
 
-        const content = fs.readFileSync(fullPath, 'utf-8');
+        const content = this.fileReader.readText(fullPath);
         fileInfos.push({ path: filePath, content });
       } catch (error) {
-        console.log(`Could not read file ${filePath}, skipping`);
+        this.logger.log(`Could not read file ${filePath}, skipping`);
       }
     }
 
@@ -222,83 +313,15 @@ class RepositoryAnalyzer {
   /**
    * Build hierarchical tree structure from flat file list
    */
-  private buildTree(files: Array<{
-    path: string;
-    loc: number;
-    lastModified: string | null;
-    lastAuthor: string | null;
-    lastCommitHash: string | null;
-    commitCount: number | null;
-    contributorCount: number | null;
-    firstCommitDate: string | null;
-    recentLinesChanged: number | null;
-    avgLinesPerCommit: number | null;
-    daysSinceLastModified: number | null;
-    isGenerated?: boolean;
-  }>): DirectoryNode {
-    const root: DirectoryNode = {
-      path: '',
-      name: 'root',
-      type: 'directory',
-      children: []
-    };
-
-    for (const file of files) {
-      const parts = file.path.split('/');
-      let currentNode = root;
-
-      // Navigate/create directory structure
-      for (let i = 0; i < parts.length - 1; i++) {
-        const dirName = parts[i];
-        const dirPath = parts.slice(0, i + 1).join('/');
-
-        let dirNode = currentNode.children.find(
-          child => child.type === 'directory' && child.name === dirName
-        ) as DirectoryNode | undefined;
-
-        if (!dirNode) {
-          dirNode = {
-            path: dirPath,
-            name: dirName,
-            type: 'directory',
-            children: []
-          };
-          currentNode.children.push(dirNode);
-        }
-
-        currentNode = dirNode;
-      }
-
-      // Add file node
-      const fileName = parts[parts.length - 1];
-      const fileNode: FileNode = {
-        path: file.path,
-        name: fileName,
-        type: 'file',
-        loc: file.loc,
-        extension: this.getExtension(fileName),
-        lastModified: file.lastModified,
-        lastAuthor: file.lastAuthor,
-        lastCommitHash: file.lastCommitHash,
-        commitCount: file.commitCount,
-        contributorCount: file.contributorCount,
-        firstCommitDate: file.firstCommitDate,
-        recentLinesChanged: file.recentLinesChanged,
-        avgLinesPerCommit: file.avgLinesPerCommit,
-        daysSinceLastModified: file.daysSinceLastModified,
-        isGenerated: file.isGenerated
-      };
-      currentNode.children.push(fileNode);
-    }
-
-    return root;
+  private buildTree(files: Parameters<typeof buildTree>[0]): DirectoryNode {
+    return buildTree(files);
   }
 
   /**
    * Analyze repository at HEAD
    */
   async analyze(): Promise<RepositorySnapshot> {
-    console.log(`Analyzing repository: ${this.repoPath}`);
+    this.logger.log(`Analyzing repository: ${this.repoPath}`);
 
     // Get HEAD commit info
     const log = await this.git.log({ maxCount: 1 });
@@ -308,63 +331,114 @@ class RepositoryAnalyzer {
       throw new Error('No commits found in repository');
     }
 
-    console.log(`HEAD commit: ${headCommit.hash}`);
-    console.log(`Reading files...`);
+    this.logger.log(`HEAD commit: ${headCommit.hash}`);
+    this.logger.log(`Reading files...`);
 
     // Get all files and calculate LOC
     const fileInfos = await this.getFilesAtHead();
-    console.log(`Found ${fileInfos.length} files`);
+    this.logger.log(`Found ${fileInfos.length} files`);
 
-    // Calculate LOC and get git metadata for each file
-    console.log('Collecting git metadata...');
-    const filesWithMetadata = [];
+    // Calculate LOC and get git metadata for each file (parallelized with concurrency pool)
+    this.logger.log('Collecting git metadata...');
     const commitMessages: Record<string, string> = {};
     let generatedFileCount = 0;
+    let completedCount = 0;
 
-    for (let i = 0; i < fileInfos.length; i++) {
-      const f = fileInfos[i];
+    // Process files in parallel with a concurrency limit to avoid overwhelming git
+    const CONCURRENCY_LIMIT = 12;
+    const fileResults: Array<{
+      path: string;
+      loc: number;
+      lastModified: string | null;
+      lastAuthor: string | null;
+      lastCommitHash: string | null;
+      lastCommitMessage: string | null;
+      commitCount: number | null;
+      contributorCount: number | null;
+      firstCommitDate: string | null;
+      recentLinesChanged: number | null;
+      avgLinesPerCommit: number | null;
+      daysSinceLastModified: number | null;
+      isGenerated: boolean | undefined;
+    }> = new Array(fileInfos.length);
+
+    const processFile = async (index: number) => {
+      const f = fileInfos[index];
       const metadata = await this.getGitMetadata(f.path);
       const isGenerated = this.isGeneratedFile(f.path);
 
-      if (isGenerated) {
-        generatedFileCount++;
-      }
-
-      filesWithMetadata.push({
+      fileResults[index] = {
         path: f.path,
         loc: this.countLinesOfCode(f.content),
         lastModified: metadata.lastModified,
         lastAuthor: metadata.lastAuthor,
         lastCommitHash: metadata.lastCommitHash,
+        lastCommitMessage: metadata.lastCommitMessage,
         commitCount: metadata.commitCount,
         contributorCount: metadata.contributorCount,
         firstCommitDate: metadata.firstCommitDate,
         recentLinesChanged: metadata.recentLinesChanged,
         avgLinesPerCommit: metadata.avgLinesPerCommit,
         daysSinceLastModified: metadata.daysSinceLastModified,
-        isGenerated: isGenerated || undefined  // Only include if true
+        isGenerated: isGenerated || undefined,
+      };
+
+      completedCount++;
+      if (completedCount % 100 === 0) {
+        this.logger.log(`  Processed ${completedCount}/${fileInfos.length} files...`);
+      }
+    };
+
+    // Concurrency pool: run up to CONCURRENCY_LIMIT tasks at once
+    const pending: Promise<void>[] = [];
+    for (let i = 0; i < fileInfos.length; i++) {
+      const promise = processFile(i).then(() => {
+        pending.splice(pending.indexOf(promise), 1);
+      });
+      pending.push(promise);
+      if (pending.length >= CONCURRENCY_LIMIT) {
+        await Promise.race(pending);
+      }
+    }
+    await Promise.all(pending);
+
+    // Collect results in order
+    const filesWithMetadata = [];
+    for (const result of fileResults) {
+      filesWithMetadata.push({
+        path: result.path,
+        loc: result.loc,
+        lastModified: result.lastModified,
+        lastAuthor: result.lastAuthor,
+        lastCommitHash: result.lastCommitHash,
+        commitCount: result.commitCount,
+        contributorCount: result.contributorCount,
+        firstCommitDate: result.firstCommitDate,
+        recentLinesChanged: result.recentLinesChanged,
+        avgLinesPerCommit: result.avgLinesPerCommit,
+        daysSinceLastModified: result.daysSinceLastModified,
+        isGenerated: result.isGenerated,
       });
 
-      // Collect unique commit messages
-      if (metadata.lastCommitHash && metadata.lastCommitMessage) {
-        if (!commitMessages[metadata.lastCommitHash]) {
-          commitMessages[metadata.lastCommitHash] = metadata.lastCommitMessage;
-        }
+      if (result.isGenerated) {
+        generatedFileCount++;
       }
 
-      // Progress indicator for large repos
-      if ((i + 1) % 100 === 0) {
-        console.log(`  Processed ${i + 1}/${fileInfos.length} files...`);
+      // Collect unique commit messages
+      if (result.lastCommitHash && result.lastCommitMessage) {
+        if (!commitMessages[result.lastCommitHash]) {
+          commitMessages[result.lastCommitHash] = result.lastCommitMessage;
+        }
       }
     }
 
     // Report generated file detection
     if (generatedFileCount > 0) {
-      console.log(`Detected ${generatedFileCount} generated/minified files (node_modules, dist, build, etc.)`);
+      this.logger.log(`Detected ${generatedFileCount} generated/minified files (node_modules, dist, build, etc.)`);
     }
 
     // Build tree structure
-    console.log('Building tree structure...');
+    this.logger.log('Building tree structure...');
     const tree = this.buildTree(filesWithMetadata);
 
     // Calculate stats
@@ -376,7 +450,7 @@ class RepositoryAnalyzer {
       filesByExtension[ext] = (filesByExtension[ext] || 0) + 1;
     }
 
-    console.log(`Collected ${Object.keys(commitMessages).length} unique commit messages`);
+    this.logger.log(`Collected ${Object.keys(commitMessages).length} unique commit messages`);
 
     const snapshot: RepositorySnapshot = {
       repositoryPath: this.repoPath,
@@ -393,130 +467,9 @@ class RepositoryAnalyzer {
       }
     };
 
-    console.log(`Analysis complete: ${totalLoc} total LOC across ${filesWithMetadata.length} files`);
+    this.logger.log(`Analysis complete: ${totalLoc} total LOC across ${filesWithMetadata.length} files`);
     return snapshot;
   }
-}
-
-/**
- * Main entry point
- */
-async function main() {
-  const args = process.argv.slice(2);
-
-  // Parse flags
-  let timelineMode = false;
-  let fullDeltaMode = false;
-  let targetCommitCount = 200;
-  const positionalArgs: string[] = [];
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--timeline') {
-      timelineMode = true;
-    } else if (arg === '--full-delta') {
-      fullDeltaMode = true;
-    } else if (arg === '--target-commits') {
-      targetCommitCount = parseInt(args[++i], 10);
-    } else if (!arg.startsWith('--')) {
-      positionalArgs.push(arg);
-    }
-  }
-
-  const repoPath = positionalArgs[0] || process.cwd();
-  const outputPath = positionalArgs[1] || path.join(__dirname, '../output/repo-data.json');
-
-  try {
-    if (fullDeltaMode) {
-      // Full Delta mode: Generate timeline-v2 with ALL commits as deltas
-      console.log('=== FULL DELTA MODE (Timeline V2) ===\n');
-
-      const analyzer = new FullDeltaAnalyzer(repoPath);
-      const v2Data = await analyzer.analyzeFullDelta();
-
-      // Determine output path
-      const repoName = path.basename(repoPath);
-      const v2OutputPath = path.join(__dirname, `../output/${repoName}-timeline-full.json`);
-
-      // Ensure output directory exists
-      const outputDir = path.dirname(v2OutputPath);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-
-      // Write output
-      fs.writeFileSync(v2OutputPath, JSON.stringify(v2Data, null, 2));
-
-      const fileSizeMB = (fs.statSync(v2OutputPath).size / (1024 * 1024)).toFixed(2);
-      console.log(`\n✅ Output written to: ${v2OutputPath}`);
-      console.log(`📦 File size: ${fileSizeMB} MB`);
-      console.log(`\n📊 Timeline V2 Stats:`);
-      console.log(`  Format: ${v2Data.format}`);
-      console.log(`  Total commits: ${v2Data.metadata.totalCommits}`);
-      console.log(`  Date range: ${v2Data.metadata.dateRange.first.substring(0, 10)} to ${v2Data.metadata.dateRange.last.substring(0, 10)}`);
-      console.log(`  Version tags: ${v2Data.metadata.tags.length}`);
-      console.log(`  Commits with deltas: ${v2Data.commits.length}`);
-
-      if (v2Data.metadata.tags.length > 0) {
-        console.log(`\n🏷️  Tags: ${v2Data.metadata.tags.slice(0, 5).join(', ')}${v2Data.metadata.tags.length > 5 ? '...' : ''}`);
-      }
-
-    } else if (timelineMode) {
-      // Timeline mode: Generate adaptive timeline with HEAD snapshot (V1)
-      console.log('=== TIMELINE MODE (V1) ===');
-      console.log(`Target commits: ${targetCommitCount}\n`);
-
-      // First generate HEAD snapshot
-      const analyzer = new RepositoryAnalyzer(repoPath);
-      const headSnapshot = await analyzer.analyze();
-
-      // Then generate timeline data
-      const timelineAnalyzer = new TimelineAnalyzer(repoPath);
-      const timelineData = await timelineAnalyzer.analyzeTimeline(targetCommitCount, headSnapshot);
-
-      // Ensure output directory exists
-      const outputDir = path.dirname(outputPath);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-
-      // Write output
-      fs.writeFileSync(outputPath, JSON.stringify(timelineData, null, 2));
-      console.log(`Output written to: ${outputPath}`);
-      console.log(`\nTimeline Stats:`);
-      console.log(`  Total commits in repo: ${timelineData.timeline.totalCommits}`);
-      console.log(`  Commits in base sampling: ${timelineData.timeline.baseSampling.actualCount}`);
-      console.log(`  Date range: ${timelineData.timeline.dateRange.first} to ${timelineData.timeline.dateRange.last}`);
-      console.log(`\nHEAD Snapshot Stats:`);
-      console.log(`  Total files: ${timelineData.headSnapshot.stats.totalFiles}`);
-      console.log(`  Total LOC: ${timelineData.headSnapshot.stats.totalLoc}`);
-    } else {
-      // Static mode: Generate HEAD snapshot only (backward compatible)
-      const analyzer = new RepositoryAnalyzer(repoPath);
-      const snapshot = await analyzer.analyze();
-
-      // Ensure output directory exists
-      const outputDir = path.dirname(outputPath);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-
-      // Write output
-      fs.writeFileSync(outputPath, JSON.stringify(snapshot, null, 2));
-      console.log(`\nOutput written to: ${outputPath}`);
-      console.log(`\nStats:`);
-      console.log(`  Total files: ${snapshot.stats.totalFiles}`);
-      console.log(`  Total LOC: ${snapshot.stats.totalLoc}`);
-      console.log(`  Files by extension:`, snapshot.stats.filesByExtension);
-    }
-  } catch (error) {
-    console.error('Error analyzing repository:', error);
-    process.exit(1);
-  }
-}
-
-if (require.main === module) {
-  main();
 }
 
 export { RepositoryAnalyzer };

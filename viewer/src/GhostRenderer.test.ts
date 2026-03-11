@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { GhostRenderer } from './GhostRenderer';
-import { DirectoryNode, FileNode } from './types';
+import { DirectoryNode, FileNode, TreeNode } from './types';
+import { createMockFile } from './lib/test-fixtures';
+
+/** Structural type for accessing GhostRenderer private state in tests */
+interface GhostRendererInternals {
+  ghostMeshes: Set<THREE.Mesh>;
+  ghostEdges: Set<THREE.Line>;
+}
 
 describe('GhostRenderer', () => {
   let ghostRenderer: GhostRenderer;
@@ -9,7 +16,7 @@ describe('GhostRenderer', () => {
   let fileObjects: Map<THREE.Object3D, FileNode>;
   let dirObjects: Map<THREE.Object3D, DirectoryNode>;
   let edges: THREE.Line[];
-  let edgeNodeMap: Map<THREE.Line, { parent: any; child: any }>;
+  let edgeNodeMap: Map<THREE.Line, { parent: TreeNode; child: TreeNode }>;
 
   beforeEach(() => {
     ghostRenderer = new GhostRenderer();
@@ -27,29 +34,13 @@ describe('GhostRenderer', () => {
         new THREE.SphereGeometry(1),
         new THREE.MeshBasicMaterial()
       );
-      const fileNode: FileNode = {
-        type: 'file',
-        name: 'deleted.ts',
-        path: 'src/deleted.ts',
-        extension: 'ts',
-        loc: 100,
-        lastModified: null,
-        lastAuthor: null,
-        commitCount: null,
-        contributorCount: null,
-        firstCommitDate: null,
-        recentLinesChanged: null,
-        avgLinesPerCommit: null,
-        daysSinceLastModified: null,
-        lastCommitHash: null,
-        isGenerated: false
-      };
+      const fileNode: FileNode = createMockFile({ name: 'deleted.ts', path: 'src/deleted.ts' });
 
       scene.add(ghostMesh);
       fileObjects.set(ghostMesh, fileNode);
 
       // Manually add to ghost renderer's tracking (simulating internal state)
-      (ghostRenderer as any).ghostMeshes.add(ghostMesh);
+      (ghostRenderer as unknown as GhostRendererInternals).ghostMeshes.add(ghostMesh);
 
       // Call clearGhosts
       ghostRenderer.clearGhosts(scene, fileObjects, edges, edgeNodeMap);
@@ -68,10 +59,10 @@ describe('GhostRenderer', () => {
 
       scene.add(ghostEdge);
       edges.push(ghostEdge);
-      edgeNodeMap.set(ghostEdge, { parent: {} as any, child: {} as any });
+      edgeNodeMap.set(ghostEdge, { parent: {} as unknown as TreeNode, child: {} as unknown as TreeNode });
 
       // Manually add to ghost renderer's tracking
-      (ghostRenderer as any).ghostEdges.add(ghostEdge);
+      (ghostRenderer as unknown as GhostRendererInternals).ghostEdges.add(ghostEdge);
 
       // Call clearGhosts
       ghostRenderer.clearGhosts(scene, fileObjects, edges, edgeNodeMap);
@@ -93,23 +84,7 @@ describe('GhostRenderer', () => {
         name: 'root',
         path: '',
         children: [
-          {
-            type: 'file',
-            name: 'file.ts',
-            path: 'src/file.ts',
-            extension: 'ts',
-            loc: 100,
-            lastModified: null,
-            lastAuthor: null,
-            commitCount: null,
-            contributorCount: null,
-            firstCommitDate: null,
-            recentLinesChanged: null,
-            avgLinesPerCommit: null,
-            daysSinceLastModified: null,
-            lastCommitHash: null,
-            isGenerated: false
-          }
+          createMockFile({ name: 'file.ts', path: 'src/file.ts' }),
         ]
       };
 
@@ -215,23 +190,7 @@ describe('GhostRenderer', () => {
         name: 'root',
         path: '',
         children: [
-          {
-            type: 'file',
-            name: 'deleted.ts',
-            path: 'deleted.ts',
-            extension: 'ts',
-            loc: 100,
-            lastModified: null,
-            lastAuthor: null,
-            commitCount: null,
-            contributorCount: null,
-            firstCommitDate: null,
-            recentLinesChanged: null,
-            avgLinesPerCommit: null,
-            daysSinceLastModified: null,
-            lastCommitHash: null,
-            isGenerated: false
-          }
+          createMockFile({ name: 'deleted.ts', path: 'deleted.ts' }),
         ]
       };
 
@@ -265,23 +224,7 @@ describe('GhostRenderer', () => {
             name: 'deleted-dir',
             path: 'deleted-dir',
             children: [
-              {
-                type: 'file',
-                name: 'file.ts',
-                path: 'deleted-dir/file.ts',
-                extension: 'ts',
-                loc: 100,
-                lastModified: null,
-                lastAuthor: null,
-                commitCount: null,
-                contributorCount: null,
-                firstCommitDate: null,
-                recentLinesChanged: null,
-                avgLinesPerCommit: null,
-                daysSinceLastModified: null,
-                lastCommitHash: null,
-                isGenerated: false
-              }
+              createMockFile({ name: 'file.ts', path: 'deleted-dir/file.ts' })
             ]
           }
         ]
@@ -327,23 +270,7 @@ describe('GhostRenderer', () => {
         name: 'root',
         path: '',
         children: [
-          {
-            type: 'file',
-            name: 'deleted.ts',
-            path: 'deleted.ts',
-            extension: 'ts',
-            loc: 100,
-            lastModified: null,
-            lastAuthor: null,
-            commitCount: null,
-            contributorCount: null,
-            firstCommitDate: null,
-            recentLinesChanged: null,
-            avgLinesPerCommit: null,
-            daysSinceLastModified: null,
-            lastCommitHash: null,
-            isGenerated: false
-          }
+          createMockFile({ name: 'deleted.ts', path: 'deleted.ts' }),
         ]
       };
 

@@ -2,16 +2,17 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { DirectoryNode, FileNode, TreeNode } from './types';
-import { getColorForExtension, DIRECTORY_COLOR } from './colorScheme';
+import { DIRECTORY_COLOR } from './colorScheme';
 import { ColorMode, getColorForFile } from './colorModeManager';
 import { FilterManager } from './filterManager';
 import { CouplingLoader } from './couplingLoader';
+import { CouplingEdge } from './coupling-types';
 import { calculateDominantColor } from './lib/directory-color-aggregation';
 import { calculateFramingPosition } from './lib/cameraPositioning';
 import { calculateDirectorySize, calculateFileSize } from './lib/node-sizing';
 import { shouldShowGrid } from './lib/grid-visibility';
 import { shouldShowFog } from './lib/fog-visibility';
-import { getCameraFOV, getControlsConfig, getDampingEnabled } from './lib/camera-configuration';
+import { getCameraFOV, getControlsConfig, getDampingEnabled, computeMaxDistance, computeFogRange } from './lib/camera-configuration';
 import { getRootYPosition, getCameraZOffset } from './lib/layout-positioning';
 import { shouldHideDirectoryNodes } from './lib/directory-visibility';
 import { GhostRenderer } from './GhostRenderer';
@@ -186,7 +187,7 @@ export class TreeVisualizer {
     this.labelMode = mode;
 
     // Update all existing labels, respecting parent mesh visibility
-    this.dirObjects.forEach((dirNode, mesh) => {
+    this.dirObjects.forEach((_dirNode, mesh) => {
       const label = mesh.children.find(child => child instanceof CSS2DObject) as CSS2DObject | undefined;
       if (label && label.element instanceof HTMLDivElement) {
         if (mode === 'always') {
@@ -279,10 +280,12 @@ export class TreeVisualizer {
       this.controls.enableRotate = controlsConfig.enableRotate;
     }
 
-    // Apply fog based on layout mode (2D disables fog to prevent dimming when zoomed out)
+    // Apply fog based on layout mode (2D disables fog to prevent dimming when zoomed out).
+    // Fog range is derived from current maxDistance so it scales with scene size.
     const bgColor = (this.scene.background as THREE.Color)?.getHex() ?? 0x1a1a1a;
     if (shouldShowFog(is2DLayout)) {
-      this.scene.fog = new THREE.Fog(bgColor, 50, 200);
+      const { near, far } = computeFogRange(this.controls.maxDistance);
+      this.scene.fog = new THREE.Fog(bgColor, near, far);
     } else {
       this.scene.fog = null;
     }
@@ -303,9 +306,11 @@ export class TreeVisualizer {
 
     this.scene.background = new THREE.Color(fogColor);
 
-    // Only set fog if not in 2D mode (2D overhead view doesn't need fog)
+    // Only set fog if not in 2D mode (2D overhead view doesn't need fog).
+    // Fog range is derived from current maxDistance so it scales with scene size.
     if (shouldShowFog(is2DLayout)) {
-      this.scene.fog = new THREE.Fog(fogColor, 50, 200);
+      const { near, far } = computeFogRange(this.controls.maxDistance);
+      this.scene.fog = new THREE.Fog(fogColor, near, far);
     } else {
       this.scene.fog = null;
     }
@@ -651,35 +656,6 @@ export class TreeVisualizer {
     return stats;
   }
 
-  /**
-   * Find the most recently modified file in a directory tree
-   */
-  private findMostRecentFile(dir: DirectoryNode): FileNode | null {
-    let mostRecent: FileNode | null = null;
-    let mostRecentDate: Date | null = null;
-
-    const processNode = (node: TreeNode) => {
-      if (node.type === 'file') {
-        if (node.lastModified) {
-          const date = new Date(node.lastModified);
-          if (!mostRecentDate || date > mostRecentDate) {
-            mostRecentDate = date;
-            mostRecent = node;
-          }
-        }
-      } else {
-        for (const child of node.children) {
-          processNode(child);
-        }
-      }
-    };
-
-    for (const child of dir.children) {
-      processNode(child);
-    }
-
-    return mostRecent;
-  }
 
   // Layout methods delegated to layout strategy
   // See ILayoutStrategy.ts and implementing classes for details
@@ -1264,7 +1240,6 @@ export class TreeVisualizer {
 
     // Calculate max LOC for normalization
     const maxFileLoc = this.findMaxLoc(newTree);
-    const maxDirLoc = this.findMaxDirectoryLoc(newTree);
 
     // Determine layout mode for positioning decisions
     const is2DLayout = this.layoutStrategy.needsContinuousUpdate?.() ?? false;
@@ -1308,8 +1283,6 @@ export class TreeVisualizer {
     }
 
     // Step 2: Add new nodes
-    const rootY = getRootYPosition(is2DLayout);
-
     for (const addedPath of addedPaths) {
       const node = pathToNode.get(addedPath);
       if (!node || node.type !== 'file') continue;
@@ -1414,6 +1387,27 @@ export class TreeVisualizer {
         material.color.setHex(color);
         material.emissive.setHex(color);
         material.needsUpdate = true;
+      }
+    }
+
+    // Step 4: Refresh ALL remaining file entries to point to new tree's FileNode objects.
+    // Trees are cloned per-commit, so unchanged files have NEW FileNode instances in the
+    // new tree. Without this step, fileObjects entries for unchanged files reference stale
+    // objects from the previous tree, causing highlighting mismatches when paths are compared.
+    const processedPaths = new Set([...addedPaths, ...modifiedPaths, ...deletedPaths]);
+    for (const [mesh, oldFileNode] of this.fileObjects.entries()) {
+      if (processedPaths.has(oldFileNode.path)) continue;
+
+      const newNode = pathToNode.get(oldFileNode.path);
+      if (newNode && newNode.type === 'file') {
+        const newFileNode = newNode as FileNode;
+        this.fileObjects.set(mesh, newFileNode);
+
+        // Update layoutNode reference too
+        const layoutNode = this.layoutNodes.find(ln => ln.mesh === mesh);
+        if (layoutNode) {
+          layoutNode.node = newFileNode;
+        }
       }
     }
 
@@ -1705,25 +1699,20 @@ export class TreeVisualizer {
     const maxFileLoc = this.findMaxLoc(this.layoutNodes[0].node);
     const maxDirLoc = this.findMaxDirectoryLoc(this.layoutNodes[0].node);
     this.createVisuals(this.layoutNodes, maxFileLoc, maxDirLoc);
-  }
 
-  /**
-   * Move camera to focus on current view
-   */
-  private focusCamera() {
-    if (this.focusedDirectory === null) {
-      // Overview: show full tree
-      const boundingBox = this.calculateBoundingBox(this.layoutNodes.filter(ln => !this.isNodeHidden(ln)));
-      this.autoFrameCamera(boundingBox);
-    } else {
-      // Focused: zoom to focused directory
-      const focusedLayout = this.layoutNodes.find(ln => ln.node === this.focusedDirectory);
-      if (focusedLayout) {
-        // Get visible children
-        const visibleNodes = this.layoutNodes.filter(ln => !this.isNodeHidden(ln));
-        const boundingBox = this.calculateBoundingBox(visibleNodes);
-        this.autoFrameCamera(boundingBox);
-      }
+    // Adjust camera limits and fog to match the actual scene extent so that
+    // large repositories are not clipped at the hardcoded 150-unit default.
+    const boundingBox = this.calculateBoundingBox(this.layoutNodes);
+    const sphere = new THREE.Sphere();
+    boundingBox.getBoundingSphere(sphere);
+    const maxDistance = computeMaxDistance(sphere.radius);
+    this.controls.maxDistance = maxDistance;
+
+    const is2DLayout = this.layoutStrategy.needsContinuousUpdate?.() ?? false;
+    if (shouldShowFog(is2DLayout) && this.scene.fog) {
+      const bgColor = (this.scene.background as THREE.Color)?.getHex() ?? 0x1a1a1a;
+      const { near, far } = computeFogRange(maxDistance);
+      this.scene.fog = new THREE.Fog(bgColor, near, far);
     }
   }
 
@@ -1919,7 +1908,7 @@ export class TreeVisualizer {
   /**
    * Highlight all members of the current cluster
    */
-  private highlightClusterMembers(focusFile: FileNode, topEdges: any[]) {
+  private highlightClusterMembers(focusFile: FileNode, topEdges: CouplingEdge[]) {
     for (const [mesh, fileNode] of this.fileObjects.entries()) {
       if (this.highlightedClusterFiles.has(fileNode.path)) {
         const material = (mesh as THREE.Mesh).material as THREE.MeshPhongMaterial;
@@ -1931,7 +1920,7 @@ export class TreeVisualizer {
     // Highlight edges to top coupled files
     for (const edge of topEdges) {
       const otherFile = edge.fileA === focusFile.path ? edge.fileB : edge.fileA;
-      for (const [mesh, fileNode] of this.fileObjects.entries()) {
+      for (const [_mesh, fileNode] of this.fileObjects.entries()) {
         if (fileNode.path === otherFile) {
           for (const line of this.edges) {
             const edgeInfo = this.edgeNodeMap.get(line);
@@ -1955,7 +1944,7 @@ export class TreeVisualizer {
    * Clear cluster member highlighting
    */
   private clearClusterHighlighting() {
-    for (const [mesh, fileNode] of this.fileObjects.entries()) {
+    for (const [mesh, _fileNode] of this.fileObjects.entries()) {
       const material = (mesh as THREE.Mesh).material as THREE.MeshPhongMaterial;
       material.emissiveIntensity = this.timelineMode !== 'off' ? 0.6 : 0.2;
       (mesh as THREE.Mesh).scale.set(1, 1, 1);

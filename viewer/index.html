@@ -1093,6 +1093,43 @@
           </div>
         </div>
 
+        <!-- Analyze Repository -->
+        <div class="header-section collapsed" id="analyze-section">
+          <div class="section-title collapsible">Analyze Repository</div>
+          <div class="section-content">
+            <div class="header-row">
+              <div class="control-group" style="flex: 1;">
+                <input type="text" id="analyze-repo-input" placeholder="Local path or GitHub URL" style="flex: 1; padding: 6px 12px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-default); border-radius: 6px; font-size: 13px;">
+              </div>
+            </div>
+            <div class="header-row">
+              <div class="control-group">
+                <label class="control-label">Mode</label>
+                <select id="analyze-mode-selector">
+                  <option value="head">HEAD Snapshot</option>
+                  <option value="timeline-v1">Timeline V1</option>
+                  <option value="timeline-v2">Timeline V2 (Full)</option>
+                  <option value="coupling">Coupling</option>
+                </select>
+              </div>
+              <div class="control-group" id="analyze-target-commits-group" style="display: none;">
+                <label class="control-label">Commits</label>
+                <input type="number" id="analyze-target-commits" value="200" min="10" max="5000" style="width: 70px; padding: 6px 8px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-default); border-radius: 6px; font-size: 13px; text-align: center;">
+              </div>
+              <button id="analyze-start-btn">Analyze</button>
+            </div>
+            <div id="analyze-progress" style="display: none;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                <div style="flex: 1; height: 6px; background: var(--border-subtle); border-radius: 3px; overflow: hidden;">
+                  <div id="analyze-progress-bar" style="height: 100%; background: var(--accent-primary); border-radius: 3px; transition: width 0.3s ease; width: 0%;"></div>
+                </div>
+                <span id="analyze-progress-percent" style="font-size: 11px; color: var(--text-muted); min-width: 32px; text-align: right;">0%</span>
+              </div>
+              <div id="analyze-progress-message" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Display Options -->
         <div class="header-section" id="display-options-section">
           <div class="section-title collapsible">Display Options</div>

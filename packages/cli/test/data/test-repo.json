@@ -1,0 +1,79 @@
+{
+  "repositoryPath": "/test/repo",
+  "commit": "abc123",
+  "timestamp": "2026-03-08T00:00:00.000Z",
+  "author": "Test Author",
+  "message": "test commit",
+  "commitMessages": {
+    "abc123": "test commit"
+  },
+  "tree": {
+    "path": "",
+    "name": "root",
+    "type": "directory",
+    "children": [
+      {
+        "path": "src",
+        "name": "src",
+        "type": "directory",
+        "children": [
+          {
+            "path": "src/A.ts",
+            "name": "A.ts",
+            "type": "file",
+            "loc": 50,
+            "extension": ".ts",
+            "lastModified": "2026-03-08T00:00:00.000Z",
+            "lastAuthor": "Alice",
+            "lastCommitHash": "abc123",
+            "commitCount": 45,
+            "contributorCount": 3,
+            "firstCommitDate": "2025-01-01T00:00:00.000Z",
+            "recentLinesChanged": 120,
+            "avgLinesPerCommit": 8.5,
+            "daysSinceLastModified": 0
+          },
+          {
+            "path": "src/B.ts",
+            "name": "B.ts",
+            "type": "file",
+            "loc": 40,
+            "extension": ".ts",
+            "lastModified": "2026-03-07T00:00:00.000Z",
+            "lastAuthor": "Bob",
+            "lastCommitHash": "def456",
+            "commitCount": 35,
+            "contributorCount": 2,
+            "firstCommitDate": "2025-01-15T00:00:00.000Z",
+            "recentLinesChanged": 80,
+            "avgLinesPerCommit": 6.0,
+            "daysSinceLastModified": 1
+          },
+          {
+            "path": "src/C.ts",
+            "name": "C.ts",
+            "type": "file",
+            "loc": 30,
+            "extension": ".ts",
+            "lastModified": "2026-03-06T00:00:00.000Z",
+            "lastAuthor": "Alice",
+            "lastCommitHash": "ghi789",
+            "commitCount": 25,
+            "contributorCount": 1,
+            "firstCommitDate": "2025-02-01T00:00:00.000Z",
+            "recentLinesChanged": 40,
+            "avgLinesPerCommit": 4.0,
+            "daysSinceLastModified": 2
+          }
+        ]
+      }
+    ]
+  },
+  "stats": {
+    "totalFiles": 3,
+    "totalLoc": 120,
+    "filesByExtension": {
+      ".ts": 3
+    }
+  }
+}

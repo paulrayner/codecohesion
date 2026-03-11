@@ -128,7 +128,7 @@ For detailed API specifications, see:
 - [Vision](../docs/api/VISION.md) - Goals and use cases
 - [Architecture](../docs/api/ARCHITECTURE.md) - Technical design
 - [Specification](../docs/api/SPEC.md) - Endpoint documentation
-- [Plan](../docs/api/PLAN.md) - Implementation roadmap
+- [Plan](../docs/plans/api-plan.md) - Implementation roadmap
 
 ## Tech Stack
 

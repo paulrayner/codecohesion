@@ -44,3 +44,35 @@ export function getControlsConfig(is2DLayout: boolean): { enableRotate: boolean 
 export function getDampingEnabled(is2DLayout: boolean): boolean {
   return !is2DLayout;
 }
+
+/**
+ * Compute OrbitControls maxDistance from scene bounding radius
+ *
+ * Scales the zoom-out limit proportionally to the scene size so that large
+ * repositories remain fully navigable. The floor of 150 preserves the
+ * existing default for small scenes.
+ *
+ * @param sceneRadius Bounding-sphere radius of all laid-out nodes
+ * @returns maxDistance value for OrbitControls
+ */
+export function computeMaxDistance(sceneRadius: number): number {
+  return Math.max(150, sceneRadius * 3);
+}
+
+/**
+ * Compute fog near/far range proportional to camera maxDistance
+ *
+ * Keeps the fog envelope scaled to the scene so the background fade
+ * starts and ends at consistent visual positions regardless of scene size.
+ * Using near = maxDistance * 0.3 and far = maxDistance * 1.2 avoids the
+ * black-screen artifact caused by fog far being inside the scene bounds.
+ *
+ * @param maxDistance OrbitControls maxDistance (from computeMaxDistance)
+ * @returns Object with near and far fog distances
+ */
+export function computeFogRange(maxDistance: number): { near: number; far: number } {
+  return {
+    near: maxDistance * 0.3,
+    far: maxDistance * 1.2,
+  };
+}

@@ -153,12 +153,18 @@ displayMetrics(data.stats);
 - Leadership reporting dashboards
 - Retrospective preparation
 
-### 6. Coupling Analysis
+### 6. Coupling & Impact Analysis
 **Scenario:** "Which files should we test together in this PR?"
 
 ```bash
-# Future endpoint
-curl "https://codecohesion-api.railway.app/api/repos/my-app/coupling?file=src/auth.ts"
+# Coupling partners for a specific file
+curl "http://localhost:3001/api/repos/my-app/coupling/src/auth.ts"
+
+# Blast radius — what breaks if I change this file?
+curl "http://localhost:3001/api/repos/my-app/impact/src/auth.ts"
+
+# Full file context — ownership, imports, functions, coupling
+curl "http://localhost:3001/api/repos/my-app/context/src/auth.ts"
 ```
 
 **Use cases:**
@@ -166,6 +172,7 @@ curl "https://codecohesion-api.railway.app/api/repos/my-app/coupling?file=src/au
 - Bounded context detection
 - Monolith decomposition planning
 - Impact analysis for changes
+- Code review preparation
 
 ---
 
@@ -236,45 +243,21 @@ Use proper status codes (200, 404, 400, 500), follow REST naming conventions, re
 
 ---
 
-## Future Direction
+## Current State & Future Direction
 
-Beyond the initial release, the API can evolve to support:
+### Implemented
+- **Core API** — 19 endpoints covering repos, stats, contributors, files, hotspots, imports, structure, complexity, coupling, impact, context, health
+- **On-Demand Analysis** — `POST /api/process` with SSE progress streaming, supports head/timeline/coupling/structure/complexity modes
+- **OpenAPI 3.1** — machine-readable spec at `/api/docs`, interactive Swagger UI at `/api/docs/ui`
+- **Health Scoring** — composite 0-100 score with weighted metrics and graceful degradation
+- **HATEOAS Navigation** — all repo listings include links to available endpoints
 
-### Phase 1: Core API (Milestone 1-2)
-- Read existing JSON analysis files
-- Expose repository stats, contributors, files, hotspots
-- URL-based repository lookup
-- Date range filtering
-
-### Phase 2: On-Demand Analysis (Milestone 3)
-- Trigger analysis via API (`POST /api/analyze?url=...`)
-- Queue management for large repositories
-- Progress tracking and webhooks
-- Persistent storage (PostgreSQL) for results
-
-### Phase 3: Advanced Queries (Milestone 4)
-- Search DSL (`?query=churn>10 AND contributors>3`)
-- Comparison endpoints (`/api/compare?from=v1.0&to=v2.0`)
-- Time-series data (track metrics over multiple analyses)
-- Aggregations (top N, percentiles, trend lines)
-
-### Phase 4: Notifications & Automation (Milestone 5)
-- Webhook subscriptions (`POST /api/webhooks`)
-- Threshold alerts (notify when churn exceeds limit)
-- Scheduled analysis (daily/weekly automatic updates)
-- Export formats (CSV, Prometheus, JSON Lines)
-
-### Phase 5: Enhanced Integrations (Milestone 6)
-- GitHub App integration (automatic PR analysis)
-- Slack/Discord bot support
-- VS Code extension data provider
-- Grafana/Datadog connectors
-
-### Phase 6: Intelligence Layer (Future)
-- Repository health scores (aggregate multiple metrics)
-- Architectural risk detection (high coupling + high churn)
-- Team capacity insights (contributor distribution)
-- Bounded context recommendations (clustering suggestions)
+### Future
+- **Persistence** — PostgreSQL storage for historical comparisons and trend tracking
+- **Advanced Queries** — Search DSL, commit comparison, aggregations, pagination
+- **Notifications** — Webhook subscriptions, threshold alerts, scheduled analysis
+- **Integrations** — GitHub App, Slack/Discord bot, VS Code extension, Grafana connectors
+- **Intelligence** — Bounded context recommendations via coupling clustering
 
 ---
 
@@ -291,16 +274,14 @@ We'll know the API is successful when:
 
 ---
 
-## Non-Goals (For Initial Release)
+## Non-Goals (Current)
 
 **Out of Scope:**
-- Real-time analysis (API won't run git analysis on-the-fly initially)
-- Authentication/authorization (open API initially, add later if needed)
-- Database persistence (read JSON files directly, add DB in Phase 2)
-- Rate limiting (trust-based initially, add if abuse occurs)
-- Versioning (v1 API from start, but no v2 planning yet)
-- Historical tracking (compare analyses over time - Phase 3 feature)
-- Write operations (API is read-only; processor generates data)
+- Authentication/authorization (open API, add later if needed)
+- Database persistence (JSON files work well for current use case)
+- Rate limiting (trust-based, add if abuse occurs)
+- API versioning (stable contract, no v2 planning yet)
+- Historical tracking (compare analyses over time — future feature)
 
 ---
 
@@ -336,23 +317,17 @@ The API doesn't replace the processor or viewer - it complements them by enablin
 
 ## Target Timeline
 
-- **Milestone 1** (1 week): Basic API with core endpoints, deployed to Railway
-- **Milestone 2** (1 week): URL convenience endpoints, date filtering, error handling
-- **Milestone 3** (2 weeks): On-demand analysis, PostgreSQL storage, job queue
-- **Milestone 4+** (Future): Advanced queries, webhooks, integrations
-
 ---
 
 ## Summary
 
 The CodeCohesion API transforms rich repository analysis data into an accessible, queryable service. It enables automation, integrations, and tooling without requiring direct file access or custom parsing logic.
 
-By following REST conventions, using minimal tooling (TypeScript + Express), and supporting progressive enhancement, the API provides immediate value while remaining extensible for future needs.
-
 **Core Value Proposition:**
-- Query contributors by date range in one HTTP call
-- Detect hotspots without parsing JSON
-- Integrate cohesion metrics into existing workflows
-- Build custom tooling on a stable API
+- 19 endpoints covering the full analysis surface (structure, complexity, coupling, impact, health)
+- On-demand processing with SSE progress streaming
+- Self-documenting via OpenAPI 3.1 spec and Swagger UI
+- Graceful degradation when optional data is missing
+- HATEOAS links for API navigation
 
 The API makes CodeCohesion data **actionable** for teams, tools, and automation systems.
