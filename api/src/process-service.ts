@@ -24,9 +24,9 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_DATA_DIR = path.join(__dirname, '../../viewer/public/data');
 const CLONE_BASE_DIR = path.join(os.tmpdir(), 'codecohesion-clones');
 
-export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'coupling' | 'structure' | 'complexity';
+export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'structure' | 'complexity';
 
-const VALID_MODES = new Set<ProcessMode>(['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure', 'complexity']);
+const VALID_MODES = new Set<ProcessMode>(['head', 'timeline-v1', 'timeline-v2', 'structure', 'complexity']);
 
 export interface ProcessJob {
   id: string;
@@ -362,9 +362,6 @@ export class ProcessService {
       case 'timeline-v2':
         return this.runTimelineV2Analysis(localPath, repoName, logger);
 
-      case 'coupling':
-        return this.runCouplingAnalysis(localPath, repoName, logger);
-
       case 'structure':
         return this.runStructureAnalysis(localPath, repoName, logger);
 
@@ -410,26 +407,17 @@ export class ProcessService {
   ): Promise<string> {
     const analyzer = new FullDeltaAnalyzer(localPath, logger);
     const data = await analyzer.analyzeFullDelta();
-    return this.writeOutput(`${repoName}-timeline-full`, data);
-  }
-
-  private async runCouplingAnalysis(
-    localPath: string,
-    repoName: string,
-    logger: Logger
-  ): Promise<string> {
-    // Coupling analysis requires a full-delta timeline first
-    logger.log('Generating full-delta timeline for coupling analysis...');
-    const deltaAnalyzer = new FullDeltaAnalyzer(localPath, logger);
-    const timelineData = await deltaAnalyzer.analyzeFullDelta();
 
     // Write timeline first (needed as input file path for coupling)
-    const timelinePath = await this.writeOutput(`${repoName}-timeline-full`, timelineData);
+    const timelinePath = await this.writeOutput(`${repoName}-timeline-full`, data);
 
-    // Run coupling analysis on the timeline data
+    // Also run coupling analysis on the timeline data
+    logger.log('Generating coupling analysis from full-delta timeline...');
     const couplingAnalyzer = new CouplingAnalyzer(logger);
-    const couplingData = couplingAnalyzer.analyze(timelineData, timelinePath);
-    return this.writeOutput(`${repoName}-coupling`, couplingData);
+    const couplingData = couplingAnalyzer.analyze(data, timelinePath);
+    await this.writeOutput(`${repoName}-coupling`, couplingData);
+
+    return timelinePath;
   }
 
   private async runStructureAnalysis(

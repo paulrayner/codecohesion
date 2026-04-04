@@ -19,6 +19,10 @@ viewer/public/data/*.json
 # Marketing content
 marketing/
 .yaks/
+.light/
+
+# Playwright MCP
+.playwright-mcp/
 
 # E2E test artifacts
 e2e/reports/

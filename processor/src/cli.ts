@@ -5,6 +5,7 @@ import * as path from 'path';
 import { RepositoryAnalyzer } from './analyze';
 import { TimelineAnalyzer } from './timeline-analyzer';
 import { FullDeltaAnalyzer } from './full-delta-analyzer';
+import { CouplingAnalyzer } from './coupling-analyzer';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -65,6 +66,20 @@ async function main() {
       if (v2Data.metadata.tags.length > 0) {
         console.log(`\nTags: ${v2Data.metadata.tags.slice(0, 5).join(', ')}${v2Data.metadata.tags.length > 5 ? '...' : ''}`);
       }
+
+      // Run coupling analysis on the full-delta timeline
+      console.log('\n=== COUPLING ANALYSIS ===\n');
+      const couplingAnalyzer = new CouplingAnalyzer();
+      const couplingData = couplingAnalyzer.analyze(v2Data, v2OutputPath);
+
+      const couplingOutputPath = path.join(outputDir, `${repoName}-coupling.json`);
+      fs.writeFileSync(couplingOutputPath, JSON.stringify(couplingData, null, 2));
+
+      const couplingSizeMB = (fs.statSync(couplingOutputPath).size / (1024 * 1024)).toFixed(2);
+      console.log(`\nCoupling output written to: ${couplingOutputPath}`);
+      console.log(`File size: ${couplingSizeMB} MB`);
+      console.log(`  Coupling edges: ${couplingData.edges.length}`);
+      console.log(`  Clusters detected: ${couplingData.clusters.length}`);
 
     } else if (timelineMode) {
       // Timeline mode: Generate adaptive timeline with HEAD snapshot (V1)

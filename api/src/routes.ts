@@ -9,7 +9,7 @@ import {
 } from './error-helper';
 import { openApiSpec } from './openapi-spec';
 
-const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'coupling', 'structure', 'complexity'] as const;
+const VALID_PROCESSING_MODES = ['head', 'timeline-v1', 'timeline-v2', 'structure', 'complexity'] as const;
 type ProcessingMode = typeof VALID_PROCESSING_MODES[number];
 
 export function createRoutes(): Router {
