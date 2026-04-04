@@ -19,6 +19,7 @@ viewer/public/data/*.json
 # Marketing content
 marketing/
 .yaks/
+.light/
 
 # E2E test artifacts
 e2e/reports/
