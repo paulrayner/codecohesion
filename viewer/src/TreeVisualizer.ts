@@ -78,11 +78,17 @@ export class TreeVisualizer {
   private stressEdgeGroup: THREE.Group | null = null;
   private stressEdgesVisible: boolean = false;
 
+  private canvas!: HTMLCanvasElement;
+  private container!: HTMLElement;
+
   private onFileClick?: (file: FileNode) => void;
   private onDirClick?: (dir: DirectoryNode) => void;
   private onHover?: (node: TreeNode | null, event?: MouseEvent) => void;
 
   constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.container = canvas.parentElement as HTMLElement;
+
     // Scene setup
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x1a1a1a);
@@ -91,7 +97,7 @@ export class TreeVisualizer {
     // Camera setup
     this.camera = new THREE.PerspectiveCamera(
       60,
-      window.innerWidth / window.innerHeight,
+      this.container.clientWidth / this.container.clientHeight,
       0.1,
       1000
     );
@@ -100,12 +106,12 @@ export class TreeVisualizer {
 
     // Renderer setup
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
 
     // Label renderer for directory names
     this.labelRenderer = new CSS2DRenderer();
-    this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    this.labelRenderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.labelRenderer.domElement.style.position = 'absolute';
     this.labelRenderer.domElement.style.top = '0';
     this.labelRenderer.domElement.style.pointerEvents = 'none';
@@ -149,7 +155,8 @@ export class TreeVisualizer {
     // Don't add to scene - will be attached to mesh on hover
 
     // Event listeners
-    window.addEventListener('resize', this.onWindowResize.bind(this));
+    const resizeObserver = new ResizeObserver(() => this.onWindowResize());
+    resizeObserver.observe(this.container);
     canvas.addEventListener('click', this.onClick.bind(this));
     canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
   }
@@ -1494,10 +1501,10 @@ export class TreeVisualizer {
    * Handle window resize
    */
   private onWindowResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    this.labelRenderer.setSize(this.container.clientWidth, this.container.clientHeight);
   }
 
   /**
@@ -1517,8 +1524,9 @@ export class TreeVisualizer {
    * Directories: highlight directory + all ancestors + all descendants
    */
   private onMouseMove(event: MouseEvent) {
-    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
@@ -1643,8 +1651,9 @@ export class TreeVisualizer {
    * Files: show details
    */
   private onClick(event: MouseEvent) {
-    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
 

@@ -21,6 +21,9 @@ marketing/
 .yaks/
 .light/
 
+# Playwright MCP
+.playwright-mcp/
+
 # E2E test artifacts
 e2e/reports/
 e2e/fixtures/test-repo/

@@ -42,16 +42,15 @@ import {
  */
 async function getAvailableRepos(): Promise<string[]> {
   try {
-    const response = await fetch('./data/repos.json');
+    const response = await fetch(`./data/repos.json?v=${Date.now()}`);
     if (response.ok) {
       const data = await response.json();
       const repos = data.repos || [];
 
-      // Remove duplicates by stripping -timeline or -timeline-full suffix
+      // Normalize to base repo names by stripping analysis suffixes
       const baseRepos = new Set<string>();
       for (const repo of repos) {
-        // Strip -timeline-full or -timeline suffix to get base name
-        const baseName = repo.replace(/-timeline(-full)?$/, '');
+        const baseName = repo.replace(/-timeline(-full)?$/, '').replace(/-coupling$/, '');
         baseRepos.add(baseName);
       }
 
@@ -1591,7 +1590,28 @@ async function loadRepository(repoName: string) {
         setSelectedMode('head');
       }
       fileToLoad = files[0];
-      data = await loadData(fileToLoad);
+      try {
+        data = await loadData(fileToLoad);
+      } catch {
+        // HEAD file doesn't exist — fall back to timeline if available
+        if (appState.repo.timelineAvailable) {
+          console.log('HEAD file not found, falling back to timeline mode');
+          setSelectedMode('timeline');
+          const timelineFiles = determineFileToLoad(repoName, 'timeline', true);
+          for (const fileName of timelineFiles.files) {
+            try {
+              data = await loadData(fileName);
+              fileToLoad = fileName;
+              break;
+            } catch {
+              continue;
+            }
+          }
+        }
+        if (!data) {
+          throw new Error(`No data files found for ${repoName}`);
+        }
+      }
     }
 
     // At this point data is always assigned — either from the loop, the fallback, or the HEAD branch.
@@ -1600,8 +1620,8 @@ async function loadRepository(repoName: string) {
     // Detect format and extract snapshot
     let snapshot: RepositorySnapshot;
 
-    // Try to load coupling data based on actual loaded file (graceful degradation if unavailable)
-    const hasCouplingData = await couplingLoader.tryLoad(fileToLoad);
+    // Try to load coupling data based on base repo name (strip -timeline-full suffix)
+    const hasCouplingData = await couplingLoader.tryLoad(getBaseRepoName(fileToLoad));
     updateColorModeOptionsForCoupling(hasCouplingData);
 
     const format = detectDataFormat(loadedData);
@@ -2080,6 +2100,21 @@ async function main() {
   if (hideGeneratedCheckbox) {
     hideGeneratedCheckbox.addEventListener('change', () => {
       applyGeneratedFileFilter();
+    });
+  }
+
+  // Set up sidebar toggle
+  const sidebar = document.getElementById('sidebar');
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
+  if (sidebar && sidebarToggle && sidebarExpandBtn) {
+    sidebarToggle.addEventListener('click', () => {
+      sidebar.classList.add('collapsed');
+      sidebarExpandBtn.style.display = 'block';
+    });
+    sidebarExpandBtn.addEventListener('click', () => {
+      sidebar.classList.remove('collapsed');
+      sidebarExpandBtn.style.display = 'none';
     });
   }
 
@@ -2875,7 +2910,8 @@ function setupAnalyzeControls() {
 
           // Auto-reload repo list and select the new repo
           const repoName = extractRepoName(repoInput.value);
-          autoLoadNewRepo(repoName);
+          const analyzeMode = modeSelector.value as ProcessMode;
+          autoLoadNewRepo(repoName, analyzeMode);
         }
 
         if (event.type === 'error') {
@@ -2898,7 +2934,7 @@ function setupAnalyzeControls() {
 /**
  * After processing completes, reload the repo dropdown and select the new repo.
  */
-async function autoLoadNewRepo(repoName: string) {
+async function autoLoadNewRepo(repoName: string, analyzeMode: ProcessMode) {
   // Re-fetch repo list
   const repos = await getAvailableRepos();
   const repoSelector = document.getElementById('repo-selector') as HTMLSelectElement | null;
@@ -2915,12 +2951,16 @@ async function autoLoadNewRepo(repoName: string) {
     repoSelector.appendChild(option);
   }
 
+  // Switch viewing mode to match the analysis that just completed
+  if (analyzeMode === 'timeline-v1' || analyzeMode === 'timeline-v2') {
+    setSelectedMode('timeline');
+  }
+
   // Try to select the newly analyzed repo (match by base name)
   const matchingRepo = repos.find(r => r.toLowerCase().includes(repoName.toLowerCase()));
   if (matchingRepo) {
     repoSelector.value = matchingRepo;
-    // Trigger the change event to load the repo
-    repoSelector.dispatchEvent(new Event('change'));
+    await loadRepository(matchingRepo);
   }
 }
 
