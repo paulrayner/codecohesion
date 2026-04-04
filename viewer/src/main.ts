@@ -58,9 +58,9 @@ async function getAvailableRepos(): Promise<string[]> {
       return Array.from(baseRepos).sort();
     }
   } catch (error) {
-    console.warn('Could not load repos list, using default');
+    console.warn('Could not load repos list');
   }
-  return ['gource']; // Default fallback
+  return [];
 }
 
 /**
@@ -1841,9 +1841,28 @@ async function main() {
       selector.appendChild(option);
     });
 
-    // Load first repo by default
+    // Load first repo by default, or show empty state
     if (repos.length > 0) {
       await loadRepository(repos[0]);
+    } else {
+      // No repos available — show welcome state and expand Analyze section
+      const loading = document.getElementById('loading');
+      if (loading) {
+        loading.textContent = '';
+        const title = document.createElement('p');
+        title.textContent = 'No repositories analyzed yet';
+        title.style.cssText = 'font-size: 18px; color: #ccc;';
+        const hint = document.createElement('p');
+        hint.textContent = 'Use the Analyze Repository section in the sidebar to get started.';
+        hint.style.cssText = 'font-size: 13px; margin-top: 12px; color: #888;';
+        loading.appendChild(title);
+        loading.appendChild(hint);
+      }
+      // Auto-expand the Analyze section so users can find it
+      const analyzeSection = document.getElementById('analyze-section');
+      if (analyzeSection) {
+        analyzeSection.classList.remove('collapsed');
+      }
     }
 
     // Handle repo switching

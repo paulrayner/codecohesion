@@ -3,7 +3,7 @@
  * Co-located test file: process-client.test.ts
  */
 
-export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2' | 'coupling';
+export type ProcessMode = 'head' | 'timeline-v1' | 'timeline-v2';
 
 export interface ProcessRequest {
   repoPath?: string;
@@ -67,7 +67,7 @@ export function validateProcessInput(repoInput: string, mode: string): string | 
     return 'Repository path or URL is required';
   }
 
-  const validModes: ProcessMode[] = ['head', 'timeline-v1', 'timeline-v2', 'coupling'];
+  const validModes: ProcessMode[] = ['head', 'timeline-v1', 'timeline-v2'];
   if (!validModes.includes(mode as ProcessMode)) {
     return `Invalid mode: ${mode}. Must be one of: ${validModes.join(', ')}`;
   }
