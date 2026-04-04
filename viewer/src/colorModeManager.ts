@@ -1,8 +1,10 @@
 import { FileNode } from './types';
 import { getColorForExtension } from './colorScheme';
 import { couplingLoader } from './couplingLoader';
+import { getHotspotColor } from './lib/hotspot-color';
+import { getPaceLayerColor, getPaceLayerLegend } from './lib/pace-layer-color';
 
-export type ColorMode = 'fileType' | 'lastModified' | 'author' | 'churn' | 'contributors' | 'fileAge' | 'recentActivity' | 'stability' | 'recency' | 'cluster' | 'linesOfCode';
+export type ColorMode = 'fileType' | 'lastModified' | 'author' | 'churn' | 'contributors' | 'fileAge' | 'recentActivity' | 'stability' | 'recency' | 'cluster' | 'linesOfCode' | 'hotspot' | 'paceLayer';
 
 export interface ColorInfo {
   hex: string;
@@ -496,6 +498,44 @@ function getColorByLinesOfCode(loc: number): ColorInfo {
 }
 
 /**
+ * Module-level maximum hotspot score, set by calculateHotspotMax.
+ * Used to normalize commitCount * recentLinesChanged to [0, 1].
+ * Falls back to a fixed cap when not set.
+ */
+let hotspotMaxScore = 0;
+
+/**
+ * Pre-compute the maximum hotspot score across all file scores.
+ * Call this after loading a snapshot, in the same pattern as
+ * calculateLastModifiedIntervals and calculateLocIntervals.
+ *
+ * @param scores Array of raw hotspot scores (commitCount * recentLinesChanged)
+ */
+export function calculateHotspotMax(scores: number[]): void {
+  hotspotMaxScore = scores.length > 0 ? Math.max(...scores) : 0;
+}
+
+/**
+ * Get color for a file using the hotspot (churn × recency) score.
+ * Normalizes commitCount * recentLinesChanged against the pre-computed max,
+ * then delegates to getHotspotColor for the cool→hot gradient.
+ *
+ * Files with no commit data or no recent activity are shown as cold (score = 0).
+ */
+function getColorByHotspot(file: FileNode): ColorInfo {
+  const commitCount = file.commitCount ?? 0;
+  const recentLinesChanged = file.recentLinesChanged ?? 0;
+  const raw = commitCount * recentLinesChanged;
+
+  // Normalize against the max observed score; fall back to a fixed cap so
+  // the function works even when calculateHotspotMax was not called.
+  const cap = hotspotMaxScore > 0 ? hotspotMaxScore : 1;
+  const normalized = Math.min(1, raw / cap);
+
+  return { hex: getHotspotColor(normalized), name: `Hotspot score: ${raw}` };
+}
+
+/**
  * Get color for a file based on the selected color mode
  */
 export function getColorForFile(file: FileNode, mode: ColorMode): ColorInfo {
@@ -546,6 +586,14 @@ export function getColorForFile(file: FileNode, mode: ColorMode): ColorInfo {
 
     case 'linesOfCode':
       return getColorByLinesOfCode(file.loc);
+
+    case 'hotspot':
+      return getColorByHotspot(file);
+
+    case 'paceLayer': {
+      const hex = getPaceLayerColor((file as FileNode & { paceLayer?: string }).paceLayer);
+      return { hex, name: (file as FileNode & { paceLayer?: string }).paceLayer ?? 'Unclassified' };
+    }
 
     default:
       return getColorForExtension(file.extension);
@@ -721,6 +769,19 @@ export function getLegendItems(mode: ColorMode): ColorInfo[] {
         { hex: '#3498db', name: 'Small (<100 LOC)' }
       ];
 
+    case 'hotspot':
+      // Five gradient stops from cold (low churn × recency) to hot (high churn × recency)
+      return [
+        { hex: getHotspotColor(1.0), name: 'Critical (very high churn × recency)' },
+        { hex: getHotspotColor(0.75), name: 'Hot (high churn × recency)' },
+        { hex: getHotspotColor(0.5), name: 'Warm (moderate churn × recency)' },
+        { hex: getHotspotColor(0.25), name: 'Cool (low churn × recency)' },
+        { hex: getHotspotColor(0.0), name: 'Cold (no recent activity)' }
+      ];
+
+    case 'paceLayer':
+      return getPaceLayerLegend();
+
     default:
       return [];
   }
@@ -753,6 +814,10 @@ export function getColorModeName(mode: ColorMode): string {
       return 'Coupling Clusters';
     case 'linesOfCode':
       return 'Lines of Code';
+    case 'hotspot':
+      return 'Hotspot (Churn × Recency)';
+    case 'paceLayer':
+      return 'Pace Layer';
     default:
       return 'Unknown';
   }

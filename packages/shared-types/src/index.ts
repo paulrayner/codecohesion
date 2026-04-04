@@ -20,6 +20,8 @@ export interface FileNode {
   avgLinesPerCommit: number | null;  // Average lines changed per commit (volatility)
   daysSinceLastModified: number | null; // Days since last modification
   isGenerated?: boolean;             // Whether file is auto-generated/minified (Phase 1)
+  paceLayer?: 'foundation' | 'infrastructure' | 'domain' | 'surface'; // Pace layer classification (Phase 2)
+  changeVelocity?: number;           // Commits per quarter or month depending on repo age (Phase 2)
 }
 
 export interface DirectoryNode {

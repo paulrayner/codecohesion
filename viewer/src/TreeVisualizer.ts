@@ -18,6 +18,7 @@ import { shouldHideDirectoryNodes } from './lib/directory-visibility';
 import { GhostRenderer } from './GhostRenderer';
 import { ILayoutStrategy, LayoutNode } from './ILayoutStrategy';
 import { HierarchicalLayoutStrategy } from './HierarchicalLayoutStrategy';
+import { getStressEdges, getStressColor } from './lib/shear-stress';
 
 interface DirectoryStats {
   totalLoc: number;
@@ -72,6 +73,11 @@ export class TreeVisualizer {
 
   private edges: THREE.Line[] = [];
   private edgeNodeMap: Map<THREE.Line, { parent: TreeNode; child: TreeNode }> = new Map();
+
+  // Shear stress edges overlay (coupling edges colored by velocity divergence)
+  private stressEdgeGroup: THREE.Group | null = null;
+  private stressEdgesVisible: boolean = false;
+
   private onFileClick?: (file: FileNode) => void;
   private onDirClick?: (dir: DirectoryNode) => void;
   private onHover?: (node: TreeNode | null, event?: MouseEvent) => void;
@@ -1966,6 +1972,94 @@ export class TreeVisualizer {
       material.linewidth = 1;
       line.visible = !shouldBeHidden;
       material.needsUpdate = true;
+    }
+  }
+
+  // ============================================================================
+  // SHEAR STRESS EDGE OVERLAY
+  // Coupling edges colored by velocity divergence between file pairs
+  // ============================================================================
+
+  /**
+   * Build (or rebuild) the shear stress edge overlay for the current scene.
+   *
+   * For every coupling edge whose stress exceeds the threshold, a THREE.Line is
+   * created that runs between the two file meshes. The line color is derived from
+   * getStressColor() — green for low divergence, red for high divergence.
+   *
+   * Requires coupling data to be loaded and file nodes to carry changeVelocity.
+   * Silently does nothing if either is absent.
+   */
+  renderShearStressEdges(threshold: number = 0.2): void {
+    // Remove any previously rendered stress edges
+    if (this.stressEdgeGroup) {
+      this.scene.remove(this.stressEdgeGroup);
+      this.stressEdgeGroup = null;
+    }
+
+    if (!this.couplingLoader || !this.couplingLoader.isLoaded()) return;
+
+    // Build a fast path→mesh map so we can locate positions for both endpoints
+    const pathToLayoutNode = new Map<string, LayoutNode>();
+    for (const layoutNode of this.layoutNodes) {
+      if (layoutNode.node.type === 'file') {
+        pathToLayoutNode.set((layoutNode.node as FileNode).path, layoutNode);
+      }
+    }
+
+    // Build a path→FileNode map to read changeVelocity
+    const pathToFileNode = new Map<string, FileNode>();
+    for (const [, fileNode] of this.fileObjects) {
+      pathToFileNode.set(fileNode.path, fileNode);
+    }
+
+    // Enrich coupling edges with velocity data for both endpoints
+    const rawEdges = this.couplingLoader.getEdges(0.1);
+    const enrichedEdges = rawEdges
+      .map((edge) => ({
+        ...edge,
+        velocityA: pathToFileNode.get(edge.fileA)?.changeVelocity ?? 0,
+        velocityB: pathToFileNode.get(edge.fileB)?.changeVelocity ?? 0,
+      }))
+      .filter((edge) => pathToLayoutNode.has(edge.fileA) && pathToLayoutNode.has(edge.fileB));
+
+    const stressEdges = getStressEdges(enrichedEdges, threshold);
+
+    const group = new THREE.Group();
+    for (const stressEdge of stressEdges) {
+      const layoutA = pathToLayoutNode.get(stressEdge.fileA);
+      const layoutB = pathToLayoutNode.get(stressEdge.fileB);
+      if (!layoutA || !layoutB) continue;
+
+      const colorHex = getStressColor(stressEdge.stress);
+      const colorInt = parseInt(colorHex.replace('#', ''), 16);
+
+      const geometry = new THREE.BufferGeometry().setFromPoints([
+        layoutA.position.clone(),
+        layoutB.position.clone(),
+      ]);
+      const material = new THREE.LineBasicMaterial({
+        color: colorInt,
+        transparent: true,
+        opacity: 0.7,
+      });
+      group.add(new THREE.Line(geometry, material));
+    }
+
+    this.stressEdgeGroup = group;
+    // Respect the current toggle state when first rendered
+    group.visible = this.stressEdgesVisible;
+    this.scene.add(group);
+  }
+
+  /**
+   * Show or hide the shear stress edge overlay.
+   * Remembers the desired state so renderShearStressEdges() can honour it on rebuild.
+   */
+  showShearStressEdges(visible: boolean): void {
+    this.stressEdgesVisible = visible;
+    if (this.stressEdgeGroup) {
+      this.stressEdgeGroup.visible = visible;
     }
   }
 

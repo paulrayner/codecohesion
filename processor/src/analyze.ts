@@ -3,6 +3,7 @@ import simpleGit, { SimpleGit } from 'simple-git';
 import { DirectoryNode, FileNode, RepositorySnapshot } from '@codecohesion/shared-types';
 import { Logger, consoleLogger } from './logger';
 import { FileReader, nodeFileReader } from './file-reader';
+import { classifyPaceLayers } from './pace-layer-classifier';
 
 interface FileInfo {
   path: string;
@@ -97,6 +98,23 @@ export function buildTree(files: Array<{
   }
 
   return root;
+}
+
+/**
+ * Walk a DirectoryNode tree and collect all leaf FileNode objects.
+ * Returns a flat array of references to the actual FileNode instances,
+ * so mutations on the returned nodes propagate back to the tree.
+ */
+function collectFileNodes(node: DirectoryNode): FileNode[] {
+  const results: FileNode[] = [];
+  for (const child of node.children) {
+    if (child.type === 'file') {
+      results.push(child);
+    } else {
+      results.push(...collectFileNodes(child));
+    }
+  }
+  return results;
 }
 
 class RepositoryAnalyzer {
@@ -440,6 +458,26 @@ class RepositoryAnalyzer {
     // Build tree structure
     this.logger.log('Building tree structure...');
     const tree = this.buildTree(filesWithMetadata);
+
+    // Enrich file nodes in-place with pace layer classification
+    this.logger.log('Classifying pace layers...');
+    const allFileNodes = collectFileNodes(tree);
+    const paceLayerDescriptors = allFileNodes.map((node) => ({
+      path: node.path,
+      // Default null commitCount to 0 — classifier treats zero-commit files as "foundation"
+      commitCount: node.commitCount ?? 0,
+      firstCommitDate: node.firstCommitDate,
+      lastModified: node.lastModified,
+    }));
+    const paceLayerResults = classifyPaceLayers(paceLayerDescriptors, new Date());
+    const paceLayerByPath = new Map(paceLayerResults.map((r) => [r.path, r]));
+    for (const node of allFileNodes) {
+      const result = paceLayerByPath.get(node.path);
+      if (result !== undefined) {
+        node.paceLayer = result.paceLayer;
+        node.changeVelocity = result.changeVelocity;
+      }
+    }
 
     // Calculate stats
     const totalLoc = filesWithMetadata.reduce((sum, f) => sum + f.loc, 0);

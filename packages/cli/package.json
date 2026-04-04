@@ -14,12 +14,13 @@
   "license": "MIT",
   "dependencies": {
     "@codecohesion/shared-types": "*",
-    "codecohesion-processor": "*"
+    "codecohesion-processor": "*",
+    "vite": "8.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.10.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.2"
   }
 }

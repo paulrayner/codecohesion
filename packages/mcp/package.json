@@ -15,12 +15,13 @@
   "dependencies": {
     "@codecohesion/shared-types": "*",
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "codecohesion-processor": "*"
+    "codecohesion-processor": "*",
+    "vite": "8.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.10.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.2"
   }
 }

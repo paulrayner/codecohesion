@@ -1993,6 +1993,22 @@ async function main() {
     });
   }
 
+  // Set up shear stress overlay toggle
+  const shearStressToggle = document.getElementById('shear-stress-toggle') as HTMLInputElement;
+  if (shearStressToggle) {
+    shearStressToggle.checked = false;
+    shearStressToggle.addEventListener('change', () => {
+      const visualizer = appState.visualizer.currentVisualizer;
+      if (!visualizer) return;
+
+      if (shearStressToggle.checked) {
+        // Render edges on first enable, then show them
+        visualizer.renderShearStressEdges();
+      }
+      visualizer.showShearStressEdges(shearStressToggle.checked);
+    });
+  }
+
   // Set up theme toggle
   const themeToggleContainer = document.getElementById('theme-toggle-container');
   const sunIcon = document.getElementById('sun-icon');
