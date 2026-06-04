@@ -15,6 +15,8 @@ import { shouldShowFog } from './lib/fog-visibility';
 import { getCameraFOV, getControlsConfig, getDampingEnabled, computeMaxDistance, computeFogRange } from './lib/camera-configuration';
 import { getRootYPosition, getCameraZOffset } from './lib/layout-positioning';
 import { shouldHideDirectoryNodes } from './lib/directory-visibility';
+import { shouldReframeCamera } from './lib/timelineCameraReframe';
+import { requiresFullRebuild } from './lib/timelineRebuildDecision';
 import { GhostRenderer } from './GhostRenderer';
 import { ILayoutStrategy, LayoutNode } from './ILayoutStrategy';
 import { HierarchicalLayoutStrategy } from './HierarchicalLayoutStrategy';
@@ -1012,7 +1014,6 @@ export class TreeVisualizer {
    * to OrbitControls so mode switches return to correct orientation.
    */
   private autoFrameCamera(boundingBox: THREE.Box3) {
-    console.log('[autoFrameCamera] ENTER - current camera:', this.camera.position.toArray());
     // Extract bounding box data
     const center = new THREE.Vector3();
     boundingBox.getCenter(center);
@@ -1033,19 +1034,9 @@ export class TreeVisualizer {
     // Determine layout mode for configuration decisions
     const is2DLayout = this.layoutStrategy.needsContinuousUpdate?.() ?? false;
 
-    // Debug: Log camera state BEFORE any changes
-    const beforeQuat = this.camera.quaternion.toArray();
-    console.log('[autoFrameCamera] BEFORE changes:');
-    console.log('  position:', this.camera.position.toArray());
-    console.log('  up:', this.camera.up.toArray());
-    console.log('  quaternion:', beforeQuat);
-    console.log('  target:', this.controls.target.toArray());
-    console.log('  is2D:', is2DLayout);
-
     // For 2D Force-Directed layouts, set up vector FIRST (before position)
     // This matches the sequence in setLayoutStrategy() which works correctly
     if (is2DLayout) {
-      console.log('[autoFrameCamera] Setting overhead orientation for 2D mode');
       this.camera.up.set(0, 1, 0);
     }
 
@@ -1060,90 +1051,24 @@ export class TreeVisualizer {
     this.camera.lookAt(config.target.x, config.target.y, config.target.z);
     this.controls.target.copy(new THREE.Vector3(config.target.x, config.target.y, config.target.z));
 
-    console.log('[autoFrameCamera] BEFORE controls.update():');
-    console.log('  camera.position:', this.camera.position.toArray());
-    console.log('  camera.quaternion:', this.camera.quaternion.toArray());
-    console.log('  controls.target:', this.controls.target.toArray());
-    // Access OrbitControls internals (these are private but we can log them for debugging)
-    console.log('  controls object:', this.controls);
-
     this.controls.update();
-
-    console.log('[autoFrameCamera] AFTER controls.update():');
-    console.log('  camera.position:', this.camera.position.toArray());
-    console.log('  camera.quaternion:', this.camera.quaternion.toArray());
-
-    // Debug: Log camera state AFTER changes but BEFORE saveState
-    const afterQuat = this.camera.quaternion.toArray();
-    console.log('[autoFrameCamera] AFTER changes, BEFORE saveState:');
-    console.log('  position:', this.camera.position.toArray());
-    console.log('  up:', this.camera.up.toArray());
-    console.log('  quaternion:', afterQuat);
-    console.log('  target:', this.controls.target.toArray());
-    console.log('  quaternion changed?',
-      beforeQuat[0] !== afterQuat[0] ||
-      beforeQuat[1] !== afterQuat[1] ||
-      beforeQuat[2] !== afterQuat[2] ||
-      beforeQuat[3] !== afterQuat[3]);
 
     // Save camera state so OrbitControls home position matches actual camera position
     // Fixes bug where switching repos/modes loses overhead orientation (2D mode)
     if (config.shouldSaveState) {
-      console.log('[autoFrameCamera] Calling saveState()...');
       this.controls.saveState();
-
-      console.log('[autoFrameCamera] AFTER saveState:');
-      console.log('  camera.quaternion:', this.camera.quaternion.toArray());
 
       // For 2D layouts, reset controls to sync internal spherical coordinates
       // This prevents controls.update() from reverting camera to old position
       if (is2DLayout) {
-        console.log('[autoFrameCamera] Calling reset() to sync OrbitControls internal state...');
         this.controls.reset();
-        console.log('[autoFrameCamera] AFTER reset:');
-        console.log('  camera.quaternion:', this.camera.quaternion.toArray());
-        console.log('  camera.position:', this.camera.position.toArray());
-
-        // Enable animation loop debugging to see what controls.update() does
-        this.debugControlsUpdate = true;
-        this.debugFrameCount = 0;
-        console.log('[autoFrameCamera] Enabled animation loop debugging for next 5 frames');
       }
-
-      // CRITICAL TEST: Monitor what happens to the camera in subsequent frames
-      let frameCount = 0;
-      const savedQuat = this.camera.quaternion.clone();
-      const savedPos = this.camera.position.clone();
-
-      const monitorCamera = () => {
-        frameCount++;
-        const currentQuat = this.camera.quaternion;
-        const currentPos = this.camera.position;
-
-        const quatChanged = !savedQuat.equals(currentQuat);
-        const posChanged = !savedPos.equals(currentPos);
-
-        if (quatChanged || posChanged) {
-          console.log(`[FRAME ${frameCount}] CAMERA CHANGED!`);
-          if (quatChanged) {
-            console.log('  Quaternion:', currentQuat.toArray());
-          }
-          if (posChanged) {
-            console.log('  Position:', currentPos.toArray());
-          }
-        }
-
-        if (frameCount < 60) {
-          requestAnimationFrame(monitorCamera);
-        } else {
-          console.log('[MONITOR COMPLETE] Checked 60 frames');
-        }
-      };
-
-      requestAnimationFrame(monitorCamera);
-    } else {
-      console.log('[autoFrameCamera] NOT saving state (shouldSaveState=false)');
     }
+
+    // Record the framed extent so timeline playback can decide when the growing
+    // tree has outgrown this framing and needs a re-fit. See shouldReframeCamera.
+    this.lastFramedSize = Math.max(size.x, size.y, size.z);
+    this.commitsSinceReframe = 0;
   }
 
   /**
@@ -1221,6 +1146,18 @@ export class TreeVisualizer {
     // Store tree for re-layout when strategy changes
     this.currentTree = newTree;
 
+    // The incremental add path below cannot create directory layout nodes that
+    // do not already exist, so files under brand-new directories would be
+    // silently dropped, leaving the timeline scene empty as the repo grows.
+    // When a commit introduces such files, rebuild the frame from the full tree.
+    const existingDirPaths = new Set(
+      this.layoutNodes
+        .filter(ln => ln.node.type === 'directory')
+        .map(ln => this.getNodePath(ln.node))
+    );
+    if (requiresFullRebuild(addedPaths, existingDirPaths)) {
+      this.visualize(newTree, false);
+    } else {
     // Build a path-to-node map for quick lookup in the new tree
     const pathToNode = new Map<string, TreeNode>();
     const buildPathMap = (node: TreeNode, parentPath: string = '') => {
@@ -1414,6 +1351,27 @@ export class TreeVisualizer {
     // Update edge positions (for Force-Directed layout)
     if (is2DLayout) {
       this.updateEdgePositions();
+    }
+    } // end incremental path (non-rebuild)
+
+    // Re-fit the camera as the tree grows during timeline playback. The opening
+    // commit frames a near-empty tree, so without this the nodes spread outside
+    // the locked view and the canvas looks empty. shouldReframeCamera throttles
+    // this to meaningful growth so it does not fight the user every frame.
+    this.commitsSinceReframe++;
+    const visibleNodes = this.layoutNodes.filter(ln => !this.isNodeHidden(ln));
+    if (visibleNodes.length > 0) {
+      const boundingBox = this.calculateBoundingBox(visibleNodes);
+      const sizeVec = new THREE.Vector3();
+      boundingBox.getSize(sizeVec);
+      const currentSize = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
+      if (shouldReframeCamera({
+        commitsSinceReframe: this.commitsSinceReframe,
+        lastFramedSize: this.lastFramedSize,
+        currentSize,
+      })) {
+        this.autoFrameCamera(boundingBox);
+      }
     }
   }
 
@@ -1716,9 +1674,10 @@ export class TreeVisualizer {
     }
   }
 
-  // Debug flag to log controls.update() behavior
-  private debugControlsUpdate = false;
-  private debugFrameCount = 0;
+  // Timeline re-framing state: extent the camera was last framed to, and how
+  // many commits have replayed since, used to re-fit as the tree grows.
+  private lastFramedSize = 0;
+  private commitsSinceReframe = 0;
 
   /**
    * Animation loop
@@ -1739,29 +1698,7 @@ export class TreeVisualizer {
     }
     this.lastFrameTime = now;
 
-    // Debug: Log what controls.update() does to the camera
-    if (this.debugControlsUpdate && this.debugFrameCount < 5) {
-      this.debugFrameCount++;
-      const beforeQuat = this.camera.quaternion.clone();
-      const beforePos = this.camera.position.clone();
-
-      this.controls.update();
-
-      const afterQuat = this.camera.quaternion;
-      const afterPos = this.camera.position;
-
-      if (!beforeQuat.equals(afterQuat) || !beforePos.equals(afterPos)) {
-        console.log(`[ANIMATE FRAME ${this.debugFrameCount}] controls.update() CHANGED camera!`);
-        console.log('  BEFORE: quat =', beforeQuat.toArray(), 'pos =', beforePos.toArray());
-        console.log('  AFTER:  quat =', afterQuat.toArray(), 'pos =', afterPos.toArray());
-        console.log('  controls.enableDamping =', this.controls.enableDamping);
-        console.log('  controls.target =', this.controls.target.toArray());
-      } else {
-        console.log(`[ANIMATE FRAME ${this.debugFrameCount}] controls.update() did NOT change camera`);
-      }
-    } else {
-      this.controls.update();
-    }
+    this.controls.update();
 
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
